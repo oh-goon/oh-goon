@@ -162,6 +162,9 @@ class PiSessionWriterReservedEvent(_FleetRunEventBase):
     continuation: PiSessionContinuationOrigin | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    history_receiver_proof: str | None = Field(
+        default=None, exclude=True, repr=False, pattern=r"^pi-history-receiver-v1:[0-9a-f]{64}$"
+    )
 
 
 class PiSessionWriterObservedEvent(_FleetRunEventBase):

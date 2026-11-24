@@ -22,6 +22,8 @@ from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.run_events import (
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
     ProcessExitedEvent,
     ProcessStartedEvent,
     StepAttemptCreatedEvent,
@@ -29,14 +31,14 @@ from oh_goon.core.models.run_events import (
 from oh_goon.core.vocabulary import FleetRunOutcome
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal
 from tests.fakes.native_lifetime import NativeDescendant, bind_native_descendant
 
 _TASK = "Review the synthetic repository with the selected native tools."
 _SKILL = "# Pi configuration fixture\nReview the selected source without changing it.\n"
+_BROKER_KEY_ENV = "OH_GOON_PI_CONFIGURATION_TEST_KEY"
 _BROKER_KEY = "synthetic-local-native-pi-key"
-_PRIOR_BROKER_KEY = "synthetic-prior-native-pi-key"
 _CURRENT_MODEL = "pi-configuration-fixture"
-_PRIOR_MODEL = "pi-previous-endpoint-fixture"
 _APPROVED_EXTENSION = "fixture_inspect"
 _DENIED_EXTENSION = "fixture_denied"
 _APPROVED_MCP = "mcp__approved__probe"
@@ -156,10 +158,8 @@ def _tool_call(name: str, ordinal: int, arguments: dict[str, str] | None = None)
     }
 
 
-def _source_prompt(
-    body: dict[str, Any], task: str = _TASK, *, model: str = _CURRENT_MODEL
-) -> dict[str, Any]:
-    assert body["model"] == model
+def _source_prompt(body: dict[str, Any], task: str = _TASK) -> dict[str, Any]:
+    assert body["model"] == _CURRENT_MODEL
     privileged = "\n".join(
         _text(message) for message in body["messages"] if message["role"] in {"system", "developer"}
     )
@@ -205,8 +205,6 @@ def _review(payload: dict[str, Any]) -> dict[str, Any]:
 @contextmanager
 def _server(
     respond: Callable[[dict[str, Any]], dict[str, Any]],
-    *,
-    key: str = _BROKER_KEY,
 ) -> Iterator[tuple[str, list[str]]]:
     errors: list[str] = []
 
@@ -214,7 +212,7 @@ def _server(
         def do_POST(self) -> None:
             try:
                 assert self.path == "/v1/chat/completions"
-                assert self.headers["Authorization"] == f"Bearer {key}"
+                assert self.headers["Authorization"] == f"Bearer {_BROKER_KEY}"
                 size = int(self.headers["Content-Length"])
                 assert 0 < size < 1024 * 1024
                 delta = respond(json.loads(self.rfile.read(size)))
@@ -256,21 +254,17 @@ def _catalog(
     url: str,
     native: Path | None = None,
     arguments: tuple[str, ...] = (),
-    *,
-    provider: str = "local",
-    model: str = _CURRENT_MODEL,
-    key_env: str = "OH_GOON_PI_CONFIGURATION_TEST_KEY",
 ) -> str:
     return json.dumps(
         {
             "providers": {
-                provider: {
+                "local": {
                     "api": "openai-chat-completions",
                     "base_url": url,
-                    "api_key_env": key_env,
+                    "api_key_env": _BROKER_KEY_ENV,
                 }
             },
-            "models": {"fixture": {"provider": provider, "model": model}},
+            "models": {"fixture": {"provider": "local", "model": _CURRENT_MODEL}},
             "native_profiles": {
                 "isolated": {
                     "backend": "bubblewrap",
@@ -320,7 +314,7 @@ def installed_pi_configuration(
         "OH_GOON_DB": tmp_path / "state" / "app.sqlite",
     }.items():
         monkeypatch.setenv(name, str(path))
-    monkeypatch.setenv("OH_GOON_PI_CONFIGURATION_TEST_KEY", _BROKER_KEY)
+    monkeypatch.setenv(_BROKER_KEY_ENV, _BROKER_KEY)
     return program, public_runtime, repository, skill
 
 
@@ -561,6 +555,8 @@ def test_installed_pi_continuation_enforces_current_native_policy(
 ) -> None:
     program, public_runtime, repository, skill = installed_pi_configuration
     prior_task = "Record the original synthetic review for a later new Run."
+    history_canary = "SYNTHETIC_PI_RETAINED_RECEIVER_HISTORY"
+    rotated_key = "synthetic-pi-different-account-key"
     project_extension = "fixture_project_probe"
     project_mcp = "mcp__project__probe"
     extension_marker = "/tmp/oh-goon-pi-project-extension-started"
@@ -592,7 +588,7 @@ def test_installed_pi_continuation_enforces_current_native_policy(
 
     def respond_prior(body: dict[str, Any]) -> dict[str, Any]:
         nonlocal prior_calls
-        _source_prompt(body, prior_task, model=_PRIOR_MODEL)
+        _source_prompt(body, prior_task)
         assert {"write", "bash"} <= {item["function"]["name"] for item in body["tools"]}
         prior_calls += 1
         if prior_calls == 1:
@@ -605,7 +601,7 @@ def test_installed_pi_continuation_enforces_current_native_policy(
             for message in body["messages"]
             if message["role"] == "tool"
         )
-        return {"role": "assistant", "content": "The prior fixture write is complete."}
+        return {"role": "assistant", "content": f"The prior write is complete. {history_canary}"}
 
     def respond_current(body: dict[str, Any]) -> dict[str, Any]:
         nonlocal current_calls
@@ -614,6 +610,17 @@ def test_installed_pi_continuation_enforces_current_native_policy(
             _text(message) for message in body["messages"] if message["role"] == "user"
         )
         assert prior_task in users, "The native exact reopen did not retain the prior turn"
+        assert any(
+            history_canary in _text(message)
+            for message in body["messages"]
+            if message["role"] == "assistant"
+        ), "Pi did not send the original assistant history to the authorized recipient"
+        assert any(
+            prior_write in _text(message)
+            for message in body["messages"]
+            if message["role"] == "tool"
+            and message.get("tool_call_id") == f"call_config_{prior_tool_ordinal}"
+        ), "Pi did not retain the original native tool result"
         privileged = "\n".join(
             _text(message)
             for message in body["messages"]
@@ -621,7 +628,7 @@ def test_installed_pi_continuation_enforces_current_native_policy(
         ).replace(payload["repository_evidence"], "")
         assert not any(
             item in privileged
-            for item in (prior_task, _PROJECT_CONTEXT_CANARY, _PROJECT_SKILL_CANARY)
+            for item in (prior_task, history_canary, _PROJECT_CONTEXT_CANARY, _PROJECT_SKILL_CANARY)
         )
         assert {item["function"]["name"] for item in body["tools"]} == {
             "read",
@@ -651,25 +658,20 @@ def test_installed_pi_continuation_enforces_current_native_policy(
         name, arguments, _ = calls[count]
         return _tool_call(name, count, arguments)
 
-    prior_key_env = "OH_GOON_PI_PRIOR_CONFIGURATION_TEST_KEY"
-    monkeypatch.setenv(prior_key_env, _PRIOR_BROKER_KEY)
+    def respond_selected(body: dict[str, Any]) -> dict[str, Any]:
+        return respond_prior(body) if prior_calls < 2 else respond_current(body)
+
+    def reject_unapproved_request(_body: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("An unapproved Pi history recipient received a request")
+
     with (
-        _server(respond_prior, key=_PRIOR_BROKER_KEY) as (prior_url, prior_errors),
-        _server(respond_current) as (url, errors),
+        _server(respond_selected) as (url, errors),
+        _server(reject_unapproved_request) as (blocked_url, blocked_errors),
     ):
-        assert prior_url != url
+        assert blocked_url != url
         catalog = tmp_path / "providers.json"
-        catalog.write_text(
-            _catalog(
-                repository,
-                program,
-                public_runtime,
-                prior_url,
-                provider="previous",
-                model=_PRIOR_MODEL,
-                key_env=prior_key_env,
-            )
-        )
+        original_catalog = _catalog(repository, program, public_runtime, url)
+        catalog.write_text(original_catalog)
         original, backend, git = resolve_native_cli_selection(
             agent="pi",
             profile="isolated",
@@ -692,8 +694,8 @@ def test_installed_pi_continuation_enforces_current_native_policy(
             )
             prior_id = admitted.fleet_run_id
             prior = prior_runtime.runs.wait_for_terminal(prior_id, timeout=60)
-            assert prior.outcome is FleetRunOutcome.SUCCESS, prior_errors
-            assert prior_calls == 2 and current_calls == 0 and not prior_errors and not errors
+            assert prior.outcome is FleetRunOutcome.SUCCESS, errors
+            assert prior_calls == 2 and current_calls == 0 and not errors
             assert (repository / prior_write).read_text() == "fixture"
             prior_agent = prior.game_tape.repositories[0].steps[0]
             prior_isolation = prior_agent.attempts[0].standard_isolation
@@ -740,17 +742,13 @@ def test_installed_pi_continuation_enforces_current_native_policy(
         public_native = tmp_path / "other-public-config"
         public_native.mkdir()
         database = LocalDatabase(Path(os.environ["OH_GOON_DB"]), read_only=True)
+        journal = Journal(database)
+        prior_events = journal.run_events(prior_id).events
         revision = database.durable_revision()
-        for native, arguments, withheld in (
-            (public_native, (), str(public_native)),
-            (private_store, (), str(private_store)),
-            (None, ("--extension", str(discovered_extension)), str(discovered_extension)),
-            (None, ("--model", _PRIOR_MODEL), _PRIOR_MODEL),
-        ):
-            catalog.write_text(
-                _catalog(repository, program, public_runtime, url, native, arguments)
-            )
-            refused = subprocess.run(
+        private_text = (private_canary, history_canary, _BROKER_KEY, rotated_key)
+
+        def reopen() -> subprocess.CompletedProcess[str]:
+            result = subprocess.run(
                 (
                     str(Path(sys.executable).with_name("oh-goon")),
                     "ai",
@@ -773,19 +771,69 @@ def test_installed_pi_continuation_enforces_current_native_policy(
                 cwd=repository,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=65,
             )
+            assert all(item not in result.stdout + result.stderr for item in private_text)
+            return result
+
+        def assert_no_inference() -> None:
+            assert prior_calls == 2 and current_calls == 0
+            # Every POST that fails endpoint or credential validation also
+            # reaches the server's error list, before the responder can count it.
+            assert not errors and not blocked_errors
+
+        unselected_model = "unselected-pi-model"
+        for native, arguments, withheld in (
+            (public_native, (), str(public_native)),
+            (private_store, (), str(private_store)),
+            (None, ("--extension", str(discovered_extension)), str(discovered_extension)),
+            (None, ("--model", unselected_model), unselected_model),
+        ):
+            catalog.write_text(
+                _catalog(repository, program, public_runtime, url, native, arguments)
+            )
+            refused = reopen()
             assert refused.returncode == 2, (refused.stdout, refused.stderr)
             refusal = json.loads(refused.stdout)
             assert refusal["code"] == PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH
             assert refusal["prior_run_id"] == prior_id and refusal["safe_next_action"]
-            assert all(
-                item not in refused.stdout + refused.stderr
-                for item in (withheld, private_canary, _PRIOR_BROKER_KEY, _BROKER_KEY)
-            )
+            assert withheld not in refused.stdout + refused.stderr
             assert database.durable_revision() == revision
-            assert prior_calls == 2 and current_calls == 0 and not prior_errors and not errors
-        catalog.write_text(_catalog(repository, program, public_runtime, url))
+            assert_no_inference()
+
+        catalog.write_text(_catalog(repository, program, public_runtime, blocked_url))
+        refused = reopen()
+        assert refused.returncode == 2, (refused.stdout, refused.stderr)
+        refusal = json.loads(refused.stdout)
+        assert refusal["code"] == PiSessionRefusalCode.HISTORY_UNQUALIFIED
+        assert refusal["prior_run_id"] == prior_id and refusal["safe_next_action"]
+        assert blocked_url not in refused.stdout + refused.stderr
+        assert database.durable_revision() == revision
+        assert_no_inference()
+
+        catalog.write_text(original_catalog)
+        with monkeypatch.context() as changed:
+            changed.setenv(_BROKER_KEY_ENV, rotated_key)
+            refused = reopen()
+        assert refused.returncode == 1, (refused.stdout, refused.stderr)
+        refusal = json.loads(refused.stdout)
+        assert refusal["outcome"] in {
+            FleetRunOutcome.FAILED.value,
+            FleetRunOutcome.ATTENTION_REQUIRED.value,
+        }
+        assert refusal["pi_session"]["prior_run_id"] == prior_id
+        assert refusal["pi_session"]["refusal_code"] == PiSessionRefusalCode.HISTORY_UNQUALIFIED
+        assert refusal["pi_session"]["safe_next_action"]
+        refused_run = journal.run_events(refusal["fleet_run_id"])
+        assert refused_run.run.status.terminal
+        assert not any(
+            isinstance(event, (PiSessionWriterReservedEvent, PiSessionWriterObservedEvent))
+            for event in refused_run.events
+        )
+        assert_no_inference()
+        assert journal.run_events(prior_id).events == prior_events
+        assert journal.inspect_pi_session(prior_id).availability == "available"
+
         selected, backend, git = resolve_native_cli_selection(
             agent="pi",
             profile="isolated",
@@ -811,7 +859,7 @@ def test_installed_pi_continuation_enforces_current_native_policy(
                 current_calls,
                 runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[-6500:],
             )
-            assert not errors and not prior_errors
+            assert not errors and not blocked_errors
             assert prior_calls == 2 and current_calls == len(calls) + 1
             evidence = detail.game_tape.pi_session
             assert evidence is not None and evidence.prior_run_id == prior_id

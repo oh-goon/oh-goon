@@ -15,7 +15,7 @@ from oh_goon.core.errors import (
     OwnershipLost,
     StateConflict,
 )
-from oh_goon.core.models.agent_providers import PiSessionUnavailable
+from oh_goon.core.models.agent_providers import PiSessionUnavailable, ResolvedAgentModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import (
     ClaimedRepositoryEffectAttempt,
@@ -46,6 +46,7 @@ from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.runtime.fault_injection import FaultInjector, FaultPoint, NoFaultInjector
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.parallel_agent_work import parallel_notes_enabled_in
+from oh_goon.runtime.pi_session_receiver import pi_history_receiver_proofs
 from oh_goon.runtime.pi_session_storage import observe_pi_session_file, pin_pi_session_directory
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
@@ -360,18 +361,26 @@ class RepositoryEffectExecution:
         layout = self._state_paths
         if layout is None or admission is None or attempt.fleet_run_id is None:
             raise PiSessionUnavailable("Pi writer requires original Fleet repository and storage")
+        fleet_run_id = attempt.fleet_run_id
+        assert native.session is not None
+        prior_run_id = native.session.prior_run_id
 
         @contextmanager
         def reserve(
-            step_id: str, attempt_number: int
+            step_id: str, attempt_number: int, model: ResolvedAgentModel
         ) -> Generator[ReservedPiSessionWriter, None, None]:
             repository = attempt.repository
+            receiver, expected_prior_receiver = pi_history_receiver_proofs(
+                layout, model, run_id=fleet_run_id, prior_run_id=prior_run_id
+            )
             reservation = self._journal.reserve_pi_session_writer(
                 session,
                 repository_id=repository.repository_id,
                 operation_id=attempt.operation_id,
                 step_id=step_id,
                 attempt_number=attempt_number,
+                history_receiver_proof=receiver,
+                expected_prior_receiver_proof=expected_prior_receiver,
             )
             prior_file, prior_native = (
                 self._journal.pi_session_continuation_source(session, reservation)

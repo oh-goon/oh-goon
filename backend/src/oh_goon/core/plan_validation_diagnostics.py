@@ -45,7 +45,9 @@ _PI_SESSION_ACTIONS: dict[str, str] = {
         "Use the matching installed Pi implementation and a qualified managed Pi RPC profile."
     ),
     PiSessionRefusalCode.HISTORY_UNQUALIFIED: (
-        "Preserve the retained history. Select a qualified session or explicitly start a fresh one."
+        "Preserve the retained history. Use its original qualified inference recipient or "
+        "explicitly start a fresh session. For a different recipient, use a separately "
+        "admitted bounded handoff."
     ),
     PiSessionRefusalCode.SETTLEMENT_UNCERTAIN: (
         "Preserve the original evidence and use its matching runtime's recovery. Avoid replaying unresolved effects."

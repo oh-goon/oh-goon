@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Literal, TypedDict, assert_never
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, PiSessionRefusalCode
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
@@ -16,7 +16,9 @@ from oh_goon.core.models.fleet_plan import (
     PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
     PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
     PLAN_TIMEOUT_RETURN_CODE,
+    ResolvedAgentStep,
     ResolvedCommandStep,
+    ResolvedNativeAgentWorkload,
     ResolvedPlanStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
@@ -111,11 +113,17 @@ class StepOutcome:
             raise ValueError("In-process completion cannot carry an owned process boundary")
         if self.completion == "not_started" and (
             type(self.returncode) is not int
-            or self.returncode
-            not in {
-                PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
-                PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
-            }
+            or (
+                self.returncode
+                not in {
+                    PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
+                    PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
+                }
+                and not (
+                    self.returncode == PLAN_CONTRACT_RETURN_CODE
+                    and self.failure_kind is PiSessionRefusalCode.HISTORY_UNQUALIFIED
+                )
+            )
             or self.skipped
             or self.resource_cleanup != "verified"
             or self.execution_authority_economics
@@ -244,8 +252,16 @@ def settle_step_execution(
     """Accept process facts once; downstream policies consume this typed meaning."""
     if outcome.completion == "in_process" and step.kind != "dependency_inventory":
         raise FleetPlanInvalid("Step workload does not own in-process completion")
-    if outcome.completion == "not_started" and not isinstance(step, ResolvedCommandStep):
-        raise FleetPlanInvalid("Only a direct Command Step can own a known launch refusal")
+    if outcome.completion == "not_started":
+        if outcome.failure_kind is PiSessionRefusalCode.HISTORY_UNQUALIFIED:
+            if (
+                not isinstance(step, ResolvedAgentStep)
+                or not isinstance(step.workload, ResolvedNativeAgentWorkload)
+                or not step.workload.native_agent.uses_persistent_pi_session
+            ):
+                raise FleetPlanInvalid("Only a persistent Pi Step can refuse history before launch")
+        elif not isinstance(step, ResolvedCommandStep):
+            raise FleetPlanInvalid("Only a direct Command Step can own a known launch refusal")
     closure = process_boundary_settled(outcome)
     cleanup: Literal["VERIFIED", "UNVERIFIED", "UNAVAILABLE"] = (
         "VERIFIED" if closure is True else "UNVERIFIED" if closure is False else "UNAVAILABLE"

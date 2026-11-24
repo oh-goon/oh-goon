@@ -4,6 +4,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 
+from oh_goon.core.models.agent_providers import ResolvedAgentModel
 from oh_goon.core.models.pi_session_storage import (
     PiSessionDirectoryPin,
     PiSessionFileObservation,
@@ -21,4 +22,6 @@ class ReservedPiSessionWriter:
     prior_native: PiSessionNativeObservation | None = field(default=None, repr=False)
 
 
-type PiSessionWriter = Callable[[str, int], AbstractContextManager[ReservedPiSessionWriter]]
+type PiSessionWriter = Callable[
+    [str, int, ResolvedAgentModel], AbstractContextManager[ReservedPiSessionWriter]
+]

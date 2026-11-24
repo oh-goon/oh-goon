@@ -41,7 +41,7 @@ from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashm
 from oh_goon.runtime.database import LocalDatabase
 from tests.fakes.native_context import controlled_native_context
 
-_SYNTHETIC_PI_BROKER_KEYS = (b"SYNTHETIC_PRIOR_KEY", b"SYNTHETIC_COMPACTION_KEY")
+_SYNTHETIC_PI_BROKER_KEY = b"SYNTHETIC_COMPACTION_KEY"
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def _observe_live_pi_scratch(payload: dict[str, Any], model: str) -> _LivePiScra
         with (bootstrap_dir / name).open("rb") as stream:
             data = stream.read(8193)
         assert 0 < len(data) <= 8192
-        assert not any(key in data for key in _SYNTHETIC_PI_BROKER_KEYS)
+        assert _SYNTHETIC_PI_BROKER_KEY not in data
         raw.append(data)
     models, settings = raw
     provider = json.loads(models)["providers"]["oh-goon"]
@@ -139,7 +139,7 @@ def _assert_pi_storage_outlives_scratch(
     assert len(saved) == receipt.size and hashlib.sha256(saved).hexdigest() == receipt.sha256
     assert not any(
         material in saved
-        for material in (*_SYNTHETIC_PI_BROKER_KEYS, scratch.local_key, *scratch.bootstrap)
+        for material in (_SYNTHETIC_PI_BROKER_KEY, scratch.local_key, *scratch.bootstrap)
     )
     return retained
 
@@ -182,7 +182,7 @@ def _assert_failed_verifier_pi_readback(
         visible = result.stdout + result.stderr
         for marker in (
             *private_markers,
-            *(key.decode() for key in _SYNTHETIC_PI_BROKER_KEYS),
+            _SYNTHETIC_PI_BROKER_KEY.decode(),
             "oh-goon-local",
             str(private_root),
             str(PI_SESSION_NEW_FILE),
@@ -443,6 +443,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 assert 0 < size <= 1024 * 1024
                 body = json.loads(self.rfile.read(size))
                 assert self.path == "/v1/chat/completions"
+                assert body["model"] == "native-compaction-fixture"
+                assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
                 messages = body["messages"]
                 privileged = "\n".join(
                     text
@@ -453,15 +455,16 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 tools = {
                     item["function"]["name"]: item["function"] for item in (body.get("tools") or [])
                 }
-                if body["model"] == "native-prior-fixture":
+                if prior_task in privileged:
                     assert reopen and request_count == 0
                     prior_requests += 1
                     assert prior_requests == 1, "Previous native inference was replayed"
-                    assert self.headers["Authorization"] == "Bearer SYNTHETIC_PRIOR_KEY"
-                    assert prior_task in privileged and prior_skill_instructions in privileged
+                    assert prior_skill_instructions in privileged
                     assert {"write", "edit", "bash"} <= tools.keys()
                     prior_payload = frozen_prompt(messages, prior_task)
-                    prior_scratch = _observe_live_pi_scratch(prior_payload, "native-prior-fixture")
+                    prior_scratch = _observe_live_pi_scratch(
+                        prior_payload, "native-compaction-fixture"
+                    )
                     prior_identity = prior_payload["identity"]
                     assert prior_identity is not None
                     prior_repository_evidence = prior_payload["repository_evidence"]
@@ -471,8 +474,6 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     return
                 if restart_task in privileged:
                     assert reopen and restart_scratch is None
-                    assert body["model"] == "native-compaction-fixture"
-                    assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
                     assert tools.keys() == {"read", "grep", "find", "ls"}
                     payload = frozen_prompt(messages, restart_task)
                     assert payload["skill_instructions"] == restart_skill_instructions
@@ -500,8 +501,6 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 assert request_count <= (8 if reopen else 6), (
                     "Native recovery exceeded the bounded scenario"
                 )
-                assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
-                assert body["model"] == "native-compaction-fixture"
                 assert "Hashmarks" in privileged and skill_text in privileged
                 all_text = "\n".join(text for message in messages for text in texts(message))
                 if identity is None:
@@ -707,7 +706,6 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     layout = ApplicationStatePathLayout.from_database(database)
     monkeypatch.setenv("OH_GOON_DB", str(database))
     monkeypatch.setenv("NATIVE_COMPACTION_KEY", "SYNTHETIC_COMPACTION_KEY")
-    monkeypatch.setenv("NATIVE_PRIOR_KEY", "SYNTHETIC_PRIOR_KEY")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -725,26 +723,10 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                                 "api": "openai-chat-completions",
                                 "base_url": base_url,
                                 "api_key_env": "NATIVE_COMPACTION_KEY",
-                            },
-                            **(
-                                {
-                                    "prior": {
-                                        "api": "openai-chat-completions",
-                                        "base_url": base_url,
-                                        "api_key_env": "NATIVE_PRIOR_KEY",
-                                    }
-                                }
-                                if reopen
-                                else {}
-                            ),
+                            }
                         },
                         "models": {
-                            "local": {"provider": "local", "model": "native-compaction-fixture"},
-                            **(
-                                {"prior": {"provider": "prior", "model": "native-prior-fixture"}}
-                                if reopen
-                                else {}
-                            ),
+                            "local": {"provider": "local", "model": "native-compaction-fixture"}
                         },
                         "native_profiles": {
                             "local": {
@@ -754,21 +736,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                                 "inference_profile": "local",
                                 "pi_rpc": pi_rpc,
                                 "timeout_seconds": 45,
-                            },
-                            **(
-                                {
-                                    "prior": {
-                                        "backend": "bubblewrap",
-                                        "allowed_agents": ["pi"],
-                                        "workspace_roots": [str(repository.parent)],
-                                        "inference_profile": "prior",
-                                        "pi_rpc": True,
-                                        "timeout_seconds": 45,
-                                    }
-                                }
-                                if reopen
-                                else {}
-                            ),
+                            }
                         },
                         "native_agents": {
                             agent: {
@@ -787,7 +755,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
             if reopen:
                 prior_selected, prior_backend, prior_git = resolve_native_cli_selection(
                     agent="pi",
-                    profile="prior",
+                    profile="local",
                     workspace=repository,
                     config_file=catalog,
                     session=PiSessionIntent(mode="new"),

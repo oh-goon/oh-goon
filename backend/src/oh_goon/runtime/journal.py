@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import sqlite3
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -26,7 +27,11 @@ from oh_goon.core.errors import (
 from oh_goon.core.execution_lifecycle_validation import pi_writer_step_settled
 from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
 from oh_goon.core.models.agent_notes import ParallelAgentTape
-from oh_goon.core.models.agent_providers import PiSessionIdentityMismatch, PiSessionUnavailable
+from oh_goon.core.models.agent_providers import (
+    PiSessionHistoryUnqualified,
+    PiSessionIdentityMismatch,
+    PiSessionUnavailable,
+)
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
     TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
@@ -759,6 +764,8 @@ class Journal:
         operation_id: str,
         step_id: str,
         attempt_number: int,
+        history_receiver_proof: str | None,
+        expected_prior_receiver_proof: str | None,
     ) -> PiSessionWriterReservedEvent:
         """Consume the original Step attempt once, before allocating writable Pi files."""
         fleet_run_id = session.require_fleet_run_id()
@@ -791,6 +798,17 @@ class Journal:
             continuation = None
             if predecessor is not None:
                 prior, observed = predecessor
+                if (
+                    prior.history_receiver_proof is None
+                    or history_receiver_proof is None
+                    or expected_prior_receiver_proof is None
+                    or not hmac.compare_digest(
+                        prior.history_receiver_proof, expected_prior_receiver_proof
+                    )
+                ):
+                    raise PiSessionHistoryUnqualified(
+                        "The current inference credentials do not qualify for the selected Pi history"
+                    )
                 storage_id = prior.storage_id
                 continuation = PiSessionContinuationOrigin(
                     prior_run_id=prior.fleet_run_id,
@@ -811,6 +829,7 @@ class Journal:
                 storage_id=storage_id,
                 lease_binding=_pi_session_lease_binding(session),
                 continuation=continuation,
+                history_receiver_proof=history_receiver_proof,
             )
             project_fleet_run_detail([*events, event], view.operation)
             self._facts.append_run_event(connection, event)
@@ -960,6 +979,10 @@ class Journal:
                     )
                 expected = source.observation.observation.file
                 assert expected is not None
+                if source.writer.history_receiver_proof is None:
+                    raise PiSessionHistoryUnqualified(
+                        "Selected Pi history has no verified inference recipient"
+                    )
                 with pin_pi_session_retirement(
                     layout=layout, storage_id=source.writer.storage_id, expected_file=expected
                 ):

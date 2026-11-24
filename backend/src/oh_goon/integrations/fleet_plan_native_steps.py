@@ -31,6 +31,7 @@ from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, Operatio
 from oh_goon.core.models.agent_notes import AgentNotesError
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
+    PiSessionHistoryUnqualified,
     ResolvedNativeAgent,
     require_pi_session_execution,
 )
@@ -691,11 +692,20 @@ def execute_native_agent_step(
     with ExitStack() as writer_scope, ExitStack() as stack:
         writer = None
         if persistent_pi:
-            assert runtime.pi_session_writer is not None
+            assert runtime.pi_session_writer is not None and model is not None
             _remaining(deadline)
-            writer = writer_scope.enter_context(
-                runtime.pi_session_writer(step.step_id, attempt_number)
-            )
+            try:
+                writer = writer_scope.enter_context(
+                    runtime.pi_session_writer(step.step_id, attempt_number, model)
+                )
+            except PiSessionHistoryUnqualified as error:
+                return StepOutcome(
+                    argv=(),
+                    returncode=PLAN_CONTRACT_RETURN_CODE,
+                    stderr=str(error),
+                    completion="not_started",
+                    failure_kind=error.code,
+                )
         control = Path(
             stack.enter_context(
                 tempfile.TemporaryDirectory(prefix="native-", dir=process.paths.tmp)

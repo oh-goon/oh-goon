@@ -14,7 +14,7 @@ from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
 )
-from oh_goon.core.models.run_events import FleetRunEvent
+from oh_goon.core.models.run_events import FleetRunEvent, PiSessionWriterReservedEvent
 from oh_goon.runtime.journal_facts import (
     AgentCampaignCommitted,
     EffectAcknowledgementCommitted,
@@ -274,8 +274,11 @@ class JournalFactCodec:
 
 
 def _canonical_model_json(model: BaseModel) -> str:
+    payload = model.model_dump(mode="json", exclude_computed_fields=True)
+    if isinstance(model, PiSessionWriterReservedEvent) and model.history_receiver_proof is not None:
+        payload["history_receiver_proof"] = model.history_receiver_proof
     return json.dumps(
-        model.model_dump(mode="json", exclude_computed_fields=True),
+        payload,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
