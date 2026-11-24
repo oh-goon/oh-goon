@@ -537,7 +537,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
-      - run: uv sync --project backend --frozen
+      - run: uv sync --project backend --frozen --no-default-groups
       - name: Observe installed source and CLI startup
         run: |
           uv run --offline --frozen --no-sync --project backend oh-goon-source-layout check

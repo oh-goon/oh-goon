@@ -136,6 +136,8 @@ jobs:
       BACKEND_CHECK_TEST_ROOTS: tests/unit tests/dependency_complete
       BACKEND_CHECK_TEST_WORKERS: '2'
       INTEGRATION_TEST_WORKERS: '2'
+      INSTALL_FRONTEND: >-
+        ${{ contains(fromJSON('["frontend-check","check-generated","check-tooling-tests","release-locks-check","test-cross-owner-integration"]'), matrix.target) }}
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
       OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
       OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
@@ -149,9 +151,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: env.INSTALL_FRONTEND == 'true' || matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration'
         with:
           node-version: '24.19.0'
-          cache: npm
+          cache: ${{ env.INSTALL_FRONTEND == 'true' && 'npm' || '' }}
           cache-dependency-path: frontend/package-lock.json
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
@@ -189,7 +192,7 @@ jobs:
             mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-
       - name: Materialize frontend consumers
         shell: bash
-        if: matrix.target == 'frontend-check' || matrix.target == 'check-generated' || matrix.target == 'check-tooling-tests' || matrix.target == 'release-locks-check'
+        if: env.INSTALL_FRONTEND == 'true'
         run: make frontend-install
       - name: Prepare owned full-verification evidence
         shell: bash
