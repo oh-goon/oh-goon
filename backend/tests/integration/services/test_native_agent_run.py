@@ -414,6 +414,9 @@ def test_codex_login_uses_original_run_and_independent_verification(
         steps = detail.game_tape.repositories[0].steps
         assert steps[0].status is GameTapeStatus.PASSED
         assert steps[0].native_agent_observations[0].settled
+        advisory = steps[0].native_agent_observations[0].events[-1].final_advisory
+        assert advisory is not None
+        assert advisory.model_dump(mode="json") == {"text": "Done", "omitted_characters": 0}
         assert steps[0].attempts[0].standard_isolation is None
         assert steps[1].status is (
             GameTapeStatus.PASSED if verification_value == 42 else GameTapeStatus.FAILED

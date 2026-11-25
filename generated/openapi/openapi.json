@@ -1556,6 +1556,16 @@
         "additionalProperties": false,
         "description": "Bounded native-agent claim, distinct from supervisor and producer facts.",
         "properties": {
+          "final_advisory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeFinalAdvisory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "enum": [
               "agent",
@@ -20047,6 +20057,29 @@
           }
         },
         "title": "NativeAgentProfile",
+        "type": "object"
+      },
+      "NativeFinalAdvisory": {
+        "additionalProperties": false,
+        "description": "Bounded final report text supplied by the original native agent.",
+        "properties": {
+          "omitted_characters": {
+            "minimum": 0.0,
+            "title": "Omitted Characters",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "omitted_characters"
+        ],
+        "title": "NativeFinalAdvisory",
         "type": "object"
       },
       "NativeRuntimeSliceEvidence": {
