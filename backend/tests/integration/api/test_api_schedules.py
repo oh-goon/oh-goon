@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
 from oh_goon.api.app import create_app
-from oh_goon.core.models.schedule import ScheduleDeleteRequest
+from oh_goon.api.schemas.schedule import RetainedReviewScheduleCreateRequest
+from oh_goon.core.models.schedule import ScheduleDefinition, ScheduleDeleteRequest
 from tests.factories.schedules import schedule_create
 from tests.integration.api.client import authenticated_api_client
 
@@ -111,7 +112,9 @@ def test_retained_review_schedule_requires_local_access_and_exact_run_selection(
 
     calls = []
 
-    def schedule(run_id: str, *, schedule_id: str, name: str | None, interval_minutes: int):
+    def schedule(
+        run_id: str, *, schedule_id: str, name: str | None, interval_minutes: int
+    ) -> ScheduleDefinition:
         calls.append((run_id, schedule_id, name, interval_minutes))
         return schedule_definition(
             now=datetime(2026, 8, 21, tzinfo=UTC),
@@ -126,12 +129,16 @@ def test_retained_review_schedule_requires_local_access_and_exact_run_selection(
         schedule_retained_review=schedule
     )
     route = "/api/schedules/review/from-review-run"
-    request = {"fleet_run_id": "fleet-original", "name": "Nightly review", "interval_minutes": 60}
+    request = RetainedReviewScheduleCreateRequest(
+        fleet_run_id="fleet-original", name="Nightly review", interval_minutes=60
+    ).model_dump(mode="json")
     with closing(TestClient(app)) as anonymous:
         assert anonymous.post(route, json=request).status_code == 401
     with closing(authenticated_api_client(app)) as client:
         assert client.post(route, json={**request, "target": {}}).status_code == 422
         assert client.post(route, json={**request, "interval_minutes": 0}).status_code == 422
+        assert client.post(route, json={**request, "fleet_run_id": "x" * 161}).status_code == 422
+        assert client.post(route, json={**request, "name": "x" * 81}).status_code == 422
         assert calls == []
         result = client.post(route, json=request)
         assert result.status_code == 201
