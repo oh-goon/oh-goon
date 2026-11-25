@@ -187,6 +187,9 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
         "parallel-work", help="Inspect both original Runs for an exact parallel work ID"
     )
     work.add_argument("work_id")
+    work.add_argument(
+        "--wait-seconds", type=int, help="Wait for terminal readback for up to 86400 seconds"
+    )
     work.add_argument("--json", action="store_true", dest="as_json")
     work.set_defaults(fleet_run_id=None)
     cancel_work = plan_subparsers.add_parser(
@@ -199,9 +202,11 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
         "parallel-notes", help="Read bounded notes and delivery evidence for an exact task"
     )
     notes.add_argument("work_id")
-    notes.add_argument("--after", type=_nonnegative_cursor, default=0)
+    notes.add_argument("--after", type=_nonnegative_cursor)
     notes.add_argument("--receipt-run", help="Author Run of an exact note request")
     notes.add_argument("--request-id", help="Exact note publication request identity")
+    notes.add_argument("--export-note", type=int, action="append", help="Exact note ID to export")
+    notes.add_argument("--output", type=Path, help="New Markdown file for selected notes")
     notes.add_argument("--json", action="store_true", dest="as_json")
     notes.set_defaults(fleet_run_id=None)
     verify = plan_subparsers.add_parser(

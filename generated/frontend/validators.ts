@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 116b8b7c41f4f661659a26e6d16723ec0e6907e37b4f93bc56c1c65257ae3b50
+// OPENAPI_SHA256: 7e0e9887d5050d3e6f9352c58af1f936bc3c88c27ac4401f89d16be344575bde
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -34,6 +34,7 @@ import { validatePrivacyResponse } from "@generated/validatorParts/validatorPart
 import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart044";
 import { validateRecoveryAcknowledgeRequest, validateRecoveryReconcileRequest, validateRecoveryStatus } from "@generated/validatorParts/validatorPart045";
 import { validateRemoveLocationRequest, validateRepositoryCatalogEntry, validateRepositoryDependencyPage } from "@generated/validatorParts/validatorPart046";
+import { validateRetainedReviewScheduleCreateRequest } from "@generated/validatorParts/validatorPart051";
 import { validateRunArtifactExport, validateRunArtifactExportRequest } from "@generated/validatorParts/validatorPart052";
 import { validateRunFeedback } from "@generated/validatorParts/validatorPart053";
 import { validateScheduleCatalog } from "@generated/validatorParts/validatorPart055";
@@ -98,6 +99,10 @@ export function decodeOperationRequest(name: OperationName, value: unknown): unk
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationRequest", validateAgentContinuationRequest, value, "$", "continue_agent_campaign request", new Set());
+      return value;
+    }
+    case "create_schedule_from_retained_review": {
+      validateReference("RetainedReviewScheduleCreateRequest", validateRetainedReviewScheduleCreateRequest, value, "$", "create_schedule_from_retained_review request", new Set());
       return value;
     }
     case "create_schedule_from_shared_plan": {
@@ -270,6 +275,10 @@ export function decodeOperationResponse(name: OperationName, value: unknown): un
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationResult", validateAgentContinuationResult, value, "$", "continue_agent_campaign response", new Set());
+      return value;
+    }
+    case "create_schedule_from_retained_review": {
+      validateReference("ScheduleDefinition", validateScheduleDefinition, value, "$", "create_schedule_from_retained_review response", new Set());
       return value;
     }
     case "create_schedule_from_shared_plan": {

@@ -166,6 +166,7 @@ def prepare_candidate_workspace(
     expected_source: RepositorySourceAuthority | None = None,
     expected_subject: str | None = None,
     expected_base_revision: str | None = None,
+    expected_source_branch: str | None = None,
     parallel_work_id: str | None = None,
     validate_candidate_path: Callable[[Path], None] | None = None,
 ) -> CandidateWorkspaceAdmission:
@@ -197,6 +198,8 @@ def prepare_candidate_workspace(
                 and observation.head_sha != expected_base_revision
             ):
                 raise StateConflict("Registered candidate base changed before preparation")
+            if expected_source_branch is not None and observation.branch != expected_source_branch:
+                raise StateConflict("Registered candidate branch changed before preparation")
             if parallel_work_id is None:
                 candidate = workspaces.request(
                     repository_id=repository.repository_id,
@@ -247,6 +250,7 @@ def prepare_candidate_workspace(
                 captured,
                 expected_state_version=allocated.state_version,
                 git=control,
+                expected_source_branch=expected_source_branch,
             )
             require_source_current()
             if repository_subject_instance_id(repository.path) != subject:

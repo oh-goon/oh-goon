@@ -71,6 +71,16 @@ Existing installed evidence retains its original environment and mode scope.
 | Codex 0.164.0, GPT-6.1 Sol at low effort, [live coding][codex-live-tests] | **PASS**, one full-stdin baseline and one task-only candidate through the original local Run and existing native sign-in. Both edit the inclusive-range sample and pass two unchanged independent verifiers with verified cleanup. Privileged payloads remain intact; stdin changes from 8,109 to 530 bytes. This is bounded coding equivalence, without a token-cost, refresh, private-store or universal model-quality claim. See [issue #22](https://github.com/oh-goon/oh-goon/issues/22). |
 | Codex 0.164.0, [managed review][codex-managed-tests] | **PASS**, three local-fixture entrypoints: original native Run, initialized catalog Plan and initialized catalog Goon, preserving the selected source/tool boundary and complete typed review. No live-account or model-quality qualification. |
 
+The recurring native review uses the public Pi 1.3.0 release entrypoint on Linux
+with Bubblewrap 0.11.1 and a controlled Chat Completions endpoint. Disposition:
+**retain** the ephemeral `--no-session` selection, managed broker disclosure,
+typed review parsing and original Step settlement. The public CLI and API proof
+uses two wall-clock occurrences across an app restart. Each reopens the exact
+approved source and captured Skill in a separate Run and Step process. Peer notes
+stay on their existing task-scoped tools, and a selected Markdown export adds no
+native extension. Other hosts, persistent sessions and live models need their
+own evidence. [Scheduled review proof](../../backend/tests/integration/services/test_native_review_schedule_cli.py) · [Live note proof](../../backend/tests/integration/services/test_native_parallel_agent_notes.py)
+
 ## Frozen context continuity — 2026-11-05
 
 [HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths

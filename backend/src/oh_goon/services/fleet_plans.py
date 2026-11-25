@@ -197,6 +197,7 @@ class FleetPlanService:
         terminal: CommandTerminal | None = None,
         standard_process_isolation: ProcessIsolationBackend | None = None,
         git_service: GitService | None = None,
+        native_git_service: GitService | None = None,
         repositories: RepositoryService | None = None,
         workspace_database: LocalDatabase | None = None,
         run_concurrency: RunConcurrencyPolicy | None = None,
@@ -211,6 +212,9 @@ class FleetPlanService:
         self._terminal = terminal
         self._standard_process_isolation = standard_process_isolation
         self._git_service = git_service
+        self._native_git_service = (
+            native_git_service if native_git_service is not None else git_service
+        )
         self._repositories = repositories
         self._workspace_database = workspace_database
         self._run_concurrency = run_concurrency
@@ -339,6 +343,7 @@ class FleetPlanService:
         candidate: bool = False,
         parallel_work_id: str | None = None,
         expected_candidate_base_revision: str | None = None,
+        expected_candidate_branch: str | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -349,6 +354,10 @@ class FleetPlanService:
         read_only_agent = role != "report" or selected.continues_pi_session
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
+        if expected_candidate_branch is not None and (
+            not candidate or expected_candidate_base_revision is None
+        ):
+            raise FleetPlanInvalid("Named candidate source requires its exact Git base")
         if parallel_work_id is not None and (
             not candidate
             or self._run_concurrency is None
@@ -407,7 +416,7 @@ class FleetPlanService:
 
         logical_repository_id = repository_id(workspace)
         candidate_admission: CandidateWorkspaceAdmission | None = None
-        capture_git = self._git_service
+        capture_git = self._native_git_service
         try:
             if candidate:
                 from oh_goon.integrations.fleet_plan_process_isolation import (
@@ -460,6 +469,7 @@ class FleetPlanService:
                         logical_repository_id
                     ),
                     expected_base_revision=expected_candidate_base_revision,
+                    expected_source_branch=expected_candidate_branch,
                     parallel_work_id=parallel_work_id,
                     validate_candidate_path=lambda path: require_native_workspace_scope(
                         path, selected
@@ -603,9 +613,9 @@ class FleetPlanService:
 
     def _require_native_git_scope(self) -> None:
         if (
-            self._git_service is None
-            or self._git_service.command_runner is None
-            or self._git_service.observation_runner is None
+            self._native_git_service is None
+            or self._native_git_service.command_runner is None
+            or self._native_git_service.observation_runner is None
         ):
             raise FleetPlanInvalid(
                 "Native isolation requires the runtime's scoped Git execution boundary"
@@ -720,7 +730,11 @@ class FleetPlanService:
             selected = replace(selected, backend_configuration_id=identity)
         elif any(value is not None for value in selected.profile.resources.model_dump().values()):
             raise FleetPlanInvalid("Local Agent resource caps require a capable isolated profile")
-        git_runner = self._git_service.command_runner if self._git_service is not None else None
+        git_runner = (
+            self._native_git_service.command_runner
+            if self._native_git_service is not None
+            else None
+        )
         if type(git_runner) is NativeProfileCommandRunner and (
             git_runner.repository != workspace or git_runner.native_agent != selected
         ):
@@ -860,7 +874,7 @@ class FleetPlanService:
             locked_skills=locked_skills,
             native_agent=native,
             repository=repository,
-            git_service=self._git_service,
+            git_service=self._native_git_service if native is not None else self._git_service,
             source_graph=graph,
             require_review_phases=require_review_phases,
             root_expected_name=root_expected_name,
@@ -1340,7 +1354,7 @@ class FleetPlanService:
                     source_graph=source_graph,
                     native_agent=native_agent,
                     repository=native_workspace if native_agent is not None else repository,
-                    git_service=self._git_service if native_agent is not None else None,
+                    git_service=self._native_git_service if native_agent is not None else None,
                 )
             else:
                 plan, handoff, source_sha256 = self._resolver.resolve_frozen_agent(
@@ -1808,7 +1822,7 @@ class FleetPlanService:
             source_graph=source_graph,
             native_agent=native_agent,
             repository=native_workspace if native_agent is not None else selected_repository,
-            git_service=self._git_service if native_agent is not None else None,
+            git_service=self._native_git_service if native_agent is not None else None,
         )
         if prepared_agent_plan is not None:
             capture_options = prepared_agent_plan.capture_options.copy()
@@ -2284,6 +2298,137 @@ class FleetPlanService:
             repository_ids=repository_ids,
             expected_repository_instance_ids=expected_repository_instance_ids,
         )
+
+    def schedule_retained_review(
+        self,
+        fleet_run_id: str,
+        *,
+        schedule_id: str,
+        interval_minutes: int,
+        name: str | None = None,
+    ) -> ScheduleDefinition:
+        """Schedule fresh executions of one successful, repository-bound native review."""
+        from oh_goon.core.capability_registry import resolve_bound_capability_intent
+        from oh_goon.core.file_digest import sha256_file_with_size
+        from oh_goon.core.models.agent_source import MAX_PREWORK_PACKET_BYTES
+        from oh_goon.core.models.fleet_plan import ResolvedNativeAgentWorkload
+        from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution
+        from oh_goon.core.models.operation import FleetPlanOperationEvidence
+        from oh_goon.core.vocabulary import FleetRunOutcome
+        from oh_goon.integrations.agent_native_execution import verify_native_agent_executable
+        from oh_goon.integrations.fleet_plan_preview import (
+            require_repository_plan_admission_current,
+        )
+
+        content_store = self._content_store
+        if not self._standard_local_fleet or content_store is None:
+            raise FleetPlanInvalid("Retained review schedules require ordinary local execution")
+        review = self._runs.get(fleet_run_id)
+        target = review.run.target
+        if (
+            review.outcome is not FleetRunOutcome.SUCCESS
+            or not isinstance(target, FleetPlanTarget)
+            or len(review.run.targets) != 1
+            or len(review.repository_admissions) != 1
+            or len(review.operations) != 1
+            or len(target.plan.steps) != 1
+            or len(target.agent_deliveries) != 1
+            or target.agent_repair is not None
+            or target.agent_continuation is not None
+            or target.candidate_workspace is not None
+            or target.caller_input_file is not None
+        ):
+            raise FleetPlanInvalid(
+                "Retained review schedules require one successful standalone repository Agent Run"
+            )
+
+        (step,) = target.plan.steps
+        if (
+            not isinstance(step, ResolvedAgentStep)
+            or not isinstance(step.workload, ResolvedNativeAgentWorkload)
+            or step.workload.role != "review"
+            or step.review_context is not None
+            or step.retry.max_attempts != 1
+        ):
+            raise FleetPlanInvalid(
+                "Retained review schedules require one independent native review"
+            )
+        native = step.workload.native_agent
+        if (
+            native.agent != "pi"
+            or native.session is None
+            or native.session.mode != "ephemeral"
+            or native.interactive
+            or native.profile.backend != "bubblewrap"
+        ):
+            raise FleetPlanInvalid("Retained review schedules require headless ephemeral Pi")
+
+        (repository,) = review.run.targets
+        (admission,) = review.repository_admissions
+        (operation,) = review.operations
+        evidence = operation.evidence
+        if (
+            operation.repository != repository
+            or admission.repository_id != repository.repository_id
+            or not isinstance(evidence, FleetPlanOperationEvidence)
+            or len(evidence.plan.steps) != 1
+            or not isinstance(evidence.plan.steps[0], CompletedPlanStepExecution)
+            or evidence.plan.steps[0].step_id != step.step_id
+        ):
+            raise FleetPlanInvalid(
+                "Retained review is missing its original completed Step evidence"
+            )
+
+        source = admission.source_authority
+        target = target.model_copy(
+            update={
+                "reviewed_repository_source": source,
+                "retained_review_run_id": review.run.fleet_run_id,
+            }
+        )
+        capability = resolve_bound_capability_intent(review.run.capability, target).definition
+        if not capability.schedule_supported or not capability.fleet_supported:
+            raise FleetPlanInvalid("Retained review capability does not support scheduling")
+        instances = {repository.repository_id: source.subject_instance_id}
+        request = _schedule_request(
+            target,
+            repository_ids={repository.repository_id},
+            repository_instance_ids=instances,
+            name=name,
+            interval_minutes=interval_minutes,
+        )
+        (delivery,) = target.agent_deliveries
+        content_store.preflight_reference_metadata(
+            delivery.reference_id,
+            owner_repository_id=repository.repository_id,
+            expected_kind="file",
+        )
+        self.repository_instance_ids_for_target(
+            target,
+            repository_ids={repository.repository_id},
+            expected_repository_instance_ids=instances,
+        )
+        require_repository_plan_admission_current(repository, target.plan, admission)
+        verify_native_agent_executable(native)
+        if self._prepare_native_agent(native, repository.path, read_only_workspace=True) != native:
+            raise FleetPlanInvalid("Retained review differs from the selected native runtime")
+
+        with content_store.acquire_lease(
+            delivery.reference_id,
+            owner_repository_id=repository.repository_id,
+            expected_kind="file",
+        ):
+            retained = content_store.get(
+                delivery.reference_id,
+                owner_repository_id=repository.repository_id,
+                expected_kind="file",
+            )
+            if retained.identity.byte_count > MAX_PREWORK_PACKET_BYTES:
+                raise FleetPlanInvalid("Retained Agent delivery exceeds its original packet budget")
+            digest, size = sha256_file_with_size(retained.path)
+            if digest != delivery.delivery_sha256 or size != retained.identity.byte_count:
+                raise FleetPlanInvalid("Retained Agent delivery changed before Schedule creation")
+            return self._schedules.create_prepared(schedule_id, request)
 
     def _prepare_scheduled_target(
         self,

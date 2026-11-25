@@ -557,7 +557,8 @@ scope described above. The request selects an explicit work ID, a clean register
 workspace and expected Git commit, two briefs for the same task, two headless Pi
 profiles, native budgets, note access, and an independent verifier. The CLI waits
 for the original Runs. Use the same request to inspect an uncertain launch
-acknowledgement by its original identity.
+acknowledgement by its original identity. Give each newly approved round its own
+work ID so its candidates, notes and verifier results remain attributable.
 
 The request requires `work_id`, `workspace`, `expected_base_revision`, `task`,
 `briefs` (two distinct strings), `native_profiles` (two profile names),
@@ -572,6 +573,7 @@ can select `["-I", "{input:verify.py}", "{candidate}"]`.
 
 ```sh
 oh-goon runs parallel-work WORK_ID --json
+oh-goon runs parallel-work WORK_ID --wait-seconds 120 --json
 oh-goon runs parallel-notes WORK_ID --after 0 --json
 oh-goon runs cancel-parallel WORK_ID --run RUN_ID
 oh-goon runs verify-candidate RUN_ID --json
@@ -587,6 +589,71 @@ shows publication and delivery metadata. The verifier and the original Run
 determine candidate eligibility. An export creates a fresh file for the selected
 checkpoint and preserves the operator's checkout and refs.
 [Parallel agent work requirements](development/PARALLEL_AGENT_WORK_REQUIREMENTS.md)
+
+The bounded wait observes the original task through read-only state. It returns
+the work record and a `terminal` or `timed_out` status. Timeout exits with
+`EVIDENCE_UNAVAILABLE` and preserves the last readback. A terminal non-success
+returns that outcome. Interrupting the wait leaves the original Runs with their
+controller. Check candidate custody and verification before launching another
+round or advancing a branch.
+
+#### Share reviewed context and continue on a named branch
+
+Select the notes useful for the next task explicitly:
+
+```sh
+oh-goon runs parallel-notes WORK_ID --export-note 2 --export-note 5 \
+  --output /private/shared-task/peer-context.md
+```
+
+The output directory must already exist outside the recorded source and runtime
+state. The command publishes a new private Markdown file with the original task,
+base, source and author provenance and selected operator-redacted bodies. Read
+the document before sharing it. Keep credentials, raw transcripts, private
+working files and general Run exports in their original scopes. Give peer
+agents the reviewed document through an explicitly selected Skill resource
+when preparing their next Run. It supplies attributed context, and the
+receiving Run captures its own source and verification authority.
+
+To keep work on a named branch, start from the exported candidate's exact Git
+base in a clean, separate clone. Inspect the export receipt and verify the
+patch SHA-256 before applying it. Use native Git in that clone:
+
+```sh
+git -C /private/agent-clone switch -c agents/approach-a BASE_COMMIT
+git -C /private/agent-clone apply --check --index /private/candidate.patch
+git -C /private/agent-clone apply --index /private/candidate.patch
+git -C /private/agent-clone diff --cached --check
+```
+
+Run the task acceptance checks on the resulting source and commit the reviewed
+changes on the agent branch. Prepare the next task and reviewed Skill locally,
+then select the receiving clone's registered root, existing branch and full
+commit for a fresh candidate Run:
+
+```sh
+oh-goon ai --agent pi --profile isolated-managed --config /private/providers.json \
+  --workspace /private/agent-clone --candidate \
+  --expect-branch agents/approach-a --expect-head REVIEWED_COMMIT \
+  --skill /private/shared-task/review-skill --prompt-file /private/next-task.txt
+```
+
+The expected branch and commit are checked before allocating the candidate and
+again by the workspace owner before Git registers the detached worktree. A
+switch to another branch at the same commit refuses admission. Repeat acceptance
+on the new output before advancing the branch. The named branch remains with
+the operator's clone. The detached candidate and its verification receipt stay
+with their original Run. Another environment requires an explicit source
+transfer and fresh admission under its tool and model policy.
+
+| Audience | Material |
+| --- | --- |
+| Active peers on the same task | Short findings, questions, interface decisions, failed approaches and attributed references through the scoped note tools. |
+| A later Run or another authorized environment | Operator-selected notes captured as a reviewed Skill resource. If advancing source, transfer the reviewed Git commit and explicitly selected patch or verification evidence. |
+| Original owner and authorized reviewers | Raw transcripts, provider state and credentials, full working files, original verification logs and worker custody evidence. |
+
+For repeated read-only reviews of one captured repository source, use the
+[existing Schedule owner](AUTOMATION_MODEL.md#recurring-native-reviews).
 
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,

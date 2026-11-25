@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid, StateConflict
+from oh_goon.core.errors import FleetPlanInvalid, StateConflict, WorkspaceStateStale
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -141,6 +141,44 @@ def test_candidate_source_refuses_dirty_registered_checkout(case):
     (case[2].path / "app.py").write_text("UNCOMMITTED\n")
     with pytest.raises(FleetPlanInvalid, match="committed and clean"):
         _prepare(case)
+
+
+def test_named_candidate_requires_exact_branch_even_at_the_same_commit(case):
+    database, _, repo = case
+    commit = _git(repo.path, "rev-parse", "HEAD")
+    _git(repo.path, "branch", "agents/approved")
+    _git(repo.path, "switch", "-c", "agents/other")
+    worktrees = _git(repo.path, "worktree", "list", "--porcelain")
+
+    with pytest.raises(StateConflict, match="branch changed before preparation"):
+        _prepare(case, expected_source_branch="agents/approved", expected_base_revision=commit)
+    assert _git(repo.path, "worktree", "list", "--porcelain") == worktrees
+
+    _git(repo.path, "switch", "agents/approved")
+
+    def switch_before_materialization(_path):
+        _git(repo.path, "switch", "agents/other")
+
+    with pytest.raises(WorkspaceStateStale, match="branch changed before materialization"):
+        _prepare(
+            case,
+            expected_source_branch="agents/approved",
+            expected_base_revision=commit,
+            validate_candidate_path=switch_before_materialization,
+        )
+    assert _git(repo.path, "worktree", "list", "--porcelain") == worktrees
+
+    _git(repo.path, "switch", "agents/approved")
+    admission = _prepare(
+        case, expected_source_branch="agents/approved", expected_base_revision=commit
+    )
+    try:
+        assert admission.workspace.base_revision == commit
+        assert _git(repo.path, "symbolic-ref", "--short", "HEAD") == "agents/approved"
+    finally:
+        release_unadmitted_candidate(
+            admission, database=database, fleet_run_id="candidate-test-run"
+        )
 
 
 def test_candidate_source_rejects_grader_material_before_byte_copy(case, monkeypatch):

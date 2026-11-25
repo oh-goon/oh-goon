@@ -425,6 +425,7 @@ class FleetRunControlPlane:
         content_store: FleetContentStore | None = None,
         worker_configuration: Callable[[str], Callable[[ExecutionTicket], RunWorkerLaunch]]
         | None = None,
+        native_worker_configuration: Callable[[str], RunWorkerPreparation] | None = None,
         worker_exit_recovery: Callable[[str], None] | None = None,
         run_capacity: ResolvedNativeRuntimeBudget | None = None,
     ) -> None:
@@ -438,6 +439,7 @@ class FleetRunControlPlane:
         self._schedule_executions = schedule_executions
         self._content_store = content_store
         self._worker_configuration = worker_configuration
+        self._native_worker_configuration = native_worker_configuration
         self._worker_exit_recovery = worker_exit_recovery
         self._run_capacity = run_capacity
         self._drain_runs: tuple[str, ...] = ()
@@ -779,9 +781,16 @@ class FleetRunControlPlane:
                 return existing
             FleetRunLifecycle.require_agent_history_authorization(intent.target)
             self._supervisor.require_accepting()
-            if self._worker_configuration is None:
+            worker_configuration = self._worker_configuration
+            if (
+                self._native_worker_configuration is not None
+                and isinstance(intent.target, FleetPlanTarget)
+                and intent.target.plan.native_agent is not None
+            ):
+                worker_configuration = self._native_worker_configuration
+            if worker_configuration is None:
                 raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")
-            prepare_worker = self._worker_configuration(fleet_run_id)
+            prepare_worker = worker_configuration(fleet_run_id)
             concurrency = (
                 prepare_worker.concurrency if type(prepare_worker) is RunWorkerPreparation else None
             )
@@ -803,6 +812,20 @@ class FleetRunControlPlane:
                 expected_repository_instance_ids=expected_repository_instance_ids,
                 **concurrent_planning,
             )
+            if (
+                source is FleetRunSource.SCHEDULED
+                and isinstance(intent.target, FleetPlanTarget)
+                and (native := intent.target.plan.native_agent) is not None
+            ):
+                if (
+                    type(prepare_worker) is not RunWorkerPreparation
+                    or prepare_worker.require_native_binding is None
+                ):
+                    raise FleetPlanInvalid(
+                        "Scheduled native Run requires an original worker binding"
+                    )
+                (entry,) = plan.targets
+                prepare_worker.require_native_binding(entry.repository.path, native)
             concurrent_admission: _ConcurrentAdmissionArguments = {}
             if concurrency is not None:
                 assert type(prepare_worker) is RunWorkerPreparation

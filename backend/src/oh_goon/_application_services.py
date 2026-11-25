@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -125,6 +127,14 @@ def _build_fleet_services(
         worker_configuration=lambda fleet_run_id: capture_run_worker_submission(
             foundation, fleet_run_id
         ),
+        native_worker_configuration=(
+            partial(
+                capture_run_worker_submission,
+                replace(foundation, git_service=foundation.native_git_service),
+            )
+            if foundation.native_git_service is not None
+            else None
+        ),
         run_capacity=foundation.run_capacity,
         worker_exit_recovery=lambda run_id: foundation.effect_recovery.recover(
             fleet_run_id=run_id, quiescence_timeout_seconds=0.0
@@ -184,6 +194,7 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         terminal=foundation.terminal,
         standard_process_isolation=foundation.standard_process_isolation,
         git_service=foundation.git_service,
+        native_git_service=foundation.native_git_service,
         repositories=repositories,
         workspace_database=foundation.database,
         run_concurrency=foundation.run_capacity.policy if foundation.run_capacity else None,

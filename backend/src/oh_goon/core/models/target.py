@@ -99,6 +99,9 @@ class FleetPlanTarget(ImmutableModel):
     reviewed_repository_source: RepositorySourceAuthority | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    retained_review_run_id: str | None = Field(
+        default=None, min_length=1, max_length=160, exclude_if=lambda value: value is None
+    )
     agent_continuation: AgentContinuationReceipt | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -197,6 +200,8 @@ class FleetPlanTarget(ImmutableModel):
             raise ValueError(
                 "scheduled caller source is not bound to this resolved execution target"
             )
+        if self.retained_review_run_id is not None and self.reviewed_repository_source is None:
+            raise ValueError("Retained review provenance requires the original repository source")
         self.require_candidate_native_intent()
         continuation = self.agent_continuation
         if continuation is not None:

@@ -45,6 +45,7 @@ from oh_goon.runtime.execution.worker_observation import (
 
 if TYPE_CHECKING:
     from oh_goon._application_foundation import RuntimeFoundation
+    from oh_goon.core.models.agent_providers import ResolvedNativeAgent
     from oh_goon.integrations.run_resource_envelope import (
         DeferredWorkerResourceScope,
         PinnedRunResourceScope,
@@ -236,6 +237,19 @@ def capture_run_worker_submission(
     if not executable or not Path(executable).is_absolute():
         raise FleetPlanInvalid("Run worker requires the selected absolute Python executable")
 
+    def require_native_binding(repository: Path, selected: ResolvedNativeAgent) -> None:
+        isolation = configuration.standard_process_isolation
+        if (
+            configuration.git.native_repository != repository
+            or configuration.git.native_agent != selected
+            or isolation is None
+            or isolation.kind != selected.profile.backend
+            or isolation.configuration_identity != selected.backend_configuration_id
+        ):
+            raise FleetPlanInvalid(
+                "Scheduled native Run requires its original scoped Git and isolation binding"
+            )
+
     def prepare(ticket: ExecutionTicket) -> RunWorkerLaunch:
         if ticket.require_fleet_run_id() != fleet_run_id:
             raise FleetPlanInvalid("Run worker submission differs from captured Run")
@@ -333,6 +347,7 @@ def capture_run_worker_submission(
         prepare,
         concurrency=deferred.admission if deferred is not None else None,
         deferred_resource_scope=configuration.deferred_worker_resource_scope,
+        require_native_binding=require_native_binding,
     )
 
 

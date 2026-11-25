@@ -535,6 +535,28 @@ class FleetRunLifecycle:
             rerun_from_run_id=rerun_from_run_id,
         )
         self.require_agent_history_authorization(target)
+        if (
+            source is FleetRunSource.SCHEDULED
+            and isinstance(target, FleetPlanTarget)
+            and target.retained_review_run_id is not None
+        ):
+            if (
+                self._content_store is None
+                or len(targets) != 1
+                or len(target.agent_deliveries) != 1
+            ):
+                raise FleetPlanInvalid("Scheduled review lacks its original retained input binding")
+            (delivery,) = target.agent_deliveries
+            try:
+                self._content_store.preflight_reference_metadata(
+                    delivery.reference_id,
+                    owner_repository_id=targets[0].repository_id,
+                    expected_kind="file",
+                )
+            except (FleetPlanInvalid, OSError):
+                raise FleetPlanInvalid(
+                    "Scheduled review's retained Agent delivery is unavailable"
+                ) from None
         application_launch = current_application_launch_receipt()
         if isinstance(target, FleetPlanTarget) and self._require_authenticated_fleet:
             # No legacy fallback (including Strict), replay or execution-ticket

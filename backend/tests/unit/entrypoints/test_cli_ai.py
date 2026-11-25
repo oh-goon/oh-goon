@@ -163,6 +163,59 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
     )
 
 
+def test_ai_review_admits_one_headless_ephemeral_pi_review(native_cli: SimpleNamespace) -> None:
+    assert main([*native_cli.argv, "--profile", "isolated", "--review", "--json"]) == 0
+    call = native_cli.runtime.plans.run_native_agent.call_args.kwargs
+    selected = call["selected"]
+    assert not selected.interactive
+    assert selected.session == PiSessionIntent(mode="ephemeral")
+    assert call["role"] == "review"
+    assert call["verification"] == ()
+    assert "candidate" not in call
+    native_cli.runtime.runs.wait_for_terminal.assert_called_once_with("native-run")
+
+
+@pytest.mark.parametrize("options", [["--verify", "git status"], ["--session", "new"]])
+def test_ai_review_rejects_effectful_or_persistent_options_before_runtime(
+    native_cli: SimpleNamespace, options: list[str]
+) -> None:
+    assert main([*native_cli.argv, "--review", "--json", *options]) == 2
+    native_cli.build.assert_not_called()
+
+
+def test_ai_passes_exact_named_candidate_source_to_original_run_owner(
+    native_cli: SimpleNamespace,
+) -> None:
+    commit = "0123456789" * 4
+    assert (
+        main(
+            [
+                *native_cli.argv,
+                "--profile",
+                "isolated",
+                "--candidate",
+                "--json",
+                "--expect-branch",
+                "agents/approved",
+                "--expect-head",
+                commit,
+            ]
+        )
+        == 0
+    )
+    call = native_cli.runtime.plans.run_native_agent.call_args.kwargs
+    assert call["expected_candidate_branch"] == "agents/approved"
+    assert call["expected_candidate_base_revision"] == commit
+    assert call["candidate"]
+
+
+def test_ai_refuses_partial_named_candidate_source_before_runtime(
+    native_cli: SimpleNamespace,
+) -> None:
+    assert main([*native_cli.argv, "--candidate", "--expect-branch", "agents/approved"]) == 2
+    native_cli.build.assert_not_called()
+
+
 def test_ai_uses_one_resolved_selection_and_original_run_wait(
     native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -77,6 +78,43 @@ def _work_exit_status(result: ParallelAgentWorkReadback) -> int:
     ):
         return 0
     return 0 if all(child.outcome is FleetRunOutcome.SUCCESS for child in result.children) else 1
+
+
+def _watch_work(args: argparse.Namespace) -> int:
+    seconds = args.wait_seconds
+    if not 1 <= seconds <= 86_400:
+        raise FleetPlanInvalid("Parallel work wait requires 1 to 86400 seconds")
+    database = _existing_database()
+    deadline = time.monotonic() + seconds
+    while True:
+        result = read_parallel_work(database, args.work_id)
+        terminal = result.dispatch_closed and all(
+            child.dispatch == "never_started"
+            or (child.status is not None and child.status.terminal)
+            for child in result.children
+        )
+        remaining = deadline - time.monotonic()
+        if terminal or remaining <= 0:
+            break
+        time.sleep(min(remaining, 0.25))
+
+    if args.as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.parallel-work-wait/v1",
+                    "status": "terminal" if terminal else "timed_out",
+                    "work": result.model_dump(mode="json"),
+                }
+            )
+        )
+    else:
+        _print_work(result, as_json=False)
+        if not terminal:
+            print("Wait elapsed before terminal readback. Original work may still be active.")
+    return _work_exit_status(result) if terminal else 3
 
 
 def _start(args: argparse.Namespace) -> int:
@@ -154,6 +192,8 @@ def run_parallel_agent_command(args: argparse.Namespace) -> int:
             )
         elif args.runs_command == "parallel-notes":
             return _notes_command(args)
+        elif args.wait_seconds is not None:
+            return _watch_work(args)
         else:
             result = read_parallel_work(_existing_database(), args.work_id)
         _print_work(result, as_json=args.as_json)
@@ -173,7 +213,21 @@ def _notes_command(args: argparse.Namespace) -> int:
 
     from oh_goon.runtime.agent_notes import AgentNotesStore
     from oh_goon.runtime.journal import Journal
+    from oh_goon.services.parallel_note_export import export_parallel_notes
 
+    if (args.export_note is None) != (args.output is None):
+        raise FleetPlanInvalid("Note export requires --export-note and --output")
+    if args.export_note is not None:
+        if any(value is not None for value in (args.after, args.receipt_run, args.request_id)):
+            raise FleetPlanInvalid("Note export cannot use paging or receipt selectors")
+        result = export_parallel_notes(
+            _existing_database(), args.work_id, tuple(args.export_note), args.output
+        )
+        if args.as_json:
+            print(json.dumps(result))
+        else:
+            print(f"Exported selected notes to {json.dumps(result['destination'])}")
+        return 0
     database = _existing_database()
     read_parallel_work(database, args.work_id)
     notes = AgentNotesStore(database, Journal(database))
@@ -185,7 +239,7 @@ def _notes_command(args: argparse.Namespace) -> int:
             raise StateConflict("Exact note publication receipt is unavailable")
         print(receipt.model_dump_json())
         return 0
-    page = notes.read_page(args.work_id, args.after)
+    page = notes.read_page(args.work_id, args.after if args.after is not None else 0)
     if args.as_json:
         print(
             json.dumps(

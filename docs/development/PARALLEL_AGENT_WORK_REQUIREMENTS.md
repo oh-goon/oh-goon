@@ -246,6 +246,31 @@ the same workspace custody and access rules are demonstrated at the selected
 capacity and the evaluation shows where extra agents improve verified outcomes.
 Qualify additional harness modes against the same requirements.
 
+Recurring collaboration uses fresh, individually bounded Runs. A later round
+selects reviewed branch content and any exported note document explicitly.
+Use native Git to apply an exact verified export onto an operator-selected
+branch, then rerun acceptance on the receiving source. Live note permissions
+belong to the admitted task and Step. A reviewed note document can travel as
+captured context while writer capabilities, native sessions, and verification
+authority remain scoped to their original owner.
+
+Recurring time triggers belong to the existing Schedule owner. A selected
+single-repository read-only review can recur on its exact captured source and
+delivery through the [public local Schedule flow](../AUTOMATION_MODEL.md#recurring-native-reviews).
+Pausing prevents new admissions. Existing Runs settle through their original
+owners. The operator selects the branch, commit and reviewed Skill for a fresh
+writable candidate through the [named-branch handoff](../AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
+
+The next boundaries for unattended collaboration are ordered by the evidence
+they need:
+
+| Boundary | Required behavior and proof |
+| --- | --- |
+| Writable recurrence | Give each agent its own selected branch and expected commit. Bind the approved predecessor, fresh source capture and reviewed documents to the original Fleet admission. After crashes or ambiguous acknowledgement, inspect the original Run and branch receipt before advancing a round. Prove stale branch, changed commit, unverified patch and unknown writer refuse. |
+| Branch advancement | Use native Git in the branch's owning clone. Require the exact verified change and expected previous tip, rerun acceptance on the receiving source, and retain the final commit and verification result. Prove that interrupted publication or a concurrent tip change cannot authorize a duplicate apply. |
+| A second environment | Give each runtime its own registration, state, tool configuration and model authorization. Transfer explicit Git source and selected task documents. Demonstrate fresh repository evidence and native verification there, with controlled restart or loss of either environment. Remote publication and model egress follow their independently authorized owner. |
+| Cross-environment live notes | Admit task membership and note recipients on each worker, then prove simultaneous attributed delivery, cancellation fencing and retention on the selected transport. An exported document remains a practical handoff when no cross-host delivery is qualified. |
+
 ## Requirements review method
 
 Use the project's [agentsCookbook pin](agents-cookbook-source.json) for lifecycle

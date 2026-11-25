@@ -102,6 +102,48 @@ this public process/CLI/API path with the existing training project and retained
 Run evidence. Its real wall-clock witness is distinct from bounded owner-clock
 tests and from an explicitly requested manual occurrence.
 
+### Recurring native reviews
+
+With a managed Pi/Bubblewrap profile, seed one successful, read-only review on a
+registered Git checkout. `--review` launches a headless Agent Run and selects an
+ephemeral Pi session. A selected Skill and its reviewed resource files are captured
+with the seed. Use one local state root for the seed, API server and readback.
+
+```sh
+oh-goon ai --agent pi --profile managed-review --workspace /absolute/repository \
+  --config /private/providers.json --review --prompt-file /private/review.txt --json
+
+oh-goon app serve --host 127.0.0.1 --port 8787 \
+  --scheduled-agent-workspace /absolute/repository \
+  --scheduled-agent-profile managed-review \
+  --scheduled-agent-catalog /private/providers.json
+```
+
+Send an authenticated `POST /api/schedules/regular-review/from-review-run` with
+the original Run ID from the seed result and an interval in minutes. Use the app
+server's local access token in `X-Oh-Goon-Local-Access`.
+
+```json
+{"fleet_run_id": "SEED_RUN_ID", "name": "Regular repository review", "interval_minutes": 5}
+```
+
+The Schedule retains the seed Run ID, exact repository authority, Plan and
+captured delivery. A successful occurrence follows the original Fleet lifecycle
+and opens a fresh, bounded native session. Use `/api/schedules` and the original
+Run and Game Tape readback to inspect each occurrence. Pause it in the Schedules
+view or use the existing Schedule update API with its current generation and
+record version. An admitted Run follows its own cancellation and settlement
+path. Restart with the same selected runtime and local state to resume cadence.
+The selected native Git boundary applies to native Plans. Ordinary Plans keep
+their original Git and Run-worker selection on the same instance.
+
+Recurrence is for the exact approved source and captured Skill. A changed source,
+new task or new documents require a fresh seed and explicit Schedule selection.
+Keep model credentials under the runtime's existing provider authority. The
+Schedule reuses the retained selector and original recipient. The ordinary
+`plan schedule` path remains for authored Plans with schedule-supported inputs.
+See [sharing reviewed context and working on separate branches](AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
+
 ## Schedule definitions are not workflow programs
 
 Valid:

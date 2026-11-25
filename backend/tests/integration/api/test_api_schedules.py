@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
+from oh_goon.api.app import create_app
 from oh_goon.core.models.schedule import ScheduleDeleteRequest
 from tests.factories.schedules import schedule_create
 from tests.integration.api.client import authenticated_api_client
@@ -99,6 +100,43 @@ def test_schedule_api_exposes_saved_plan_creation_and_metadata_only_replace() ->
                     record_version=definition.record_version,
                 ),
             )
+
+
+def test_retained_review_schedule_requires_local_access_and_exact_run_selection() -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from oh_goon.api.dependencies import fleet_plan_service
+    from tests.factories.schedules import schedule_definition
+
+    calls = []
+
+    def schedule(run_id: str, *, schedule_id: str, name: str | None, interval_minutes: int):
+        calls.append((run_id, schedule_id, name, interval_minutes))
+        return schedule_definition(
+            now=datetime(2026, 8, 21, tzinfo=UTC),
+            schedule_id=schedule_id,
+            name=name or "Native review",
+            repository_ids=("review-source",),
+            interval_minutes=interval_minutes,
+        )
+
+    app = create_app(local_access_token="schedule-review-test-token")
+    app.dependency_overrides[fleet_plan_service] = lambda: SimpleNamespace(
+        schedule_retained_review=schedule
+    )
+    route = "/api/schedules/review/from-review-run"
+    request = {"fleet_run_id": "fleet-original", "name": "Nightly review", "interval_minutes": 60}
+    with closing(TestClient(app)) as anonymous:
+        assert anonymous.post(route, json=request).status_code == 401
+    with closing(authenticated_api_client(app)) as client:
+        assert client.post(route, json={**request, "target": {}}).status_code == 422
+        assert client.post(route, json={**request, "interval_minutes": 0}).status_code == 422
+        assert calls == []
+        result = client.post(route, json=request)
+        assert result.status_code == 201
+        assert result.json()["schedule_id"] == "review"
+    assert calls == [("fleet-original", "review", "Nightly review", 60)]
 
 
 def test_schedule_can_be_created_from_shared_plan_without_browser_resolution() -> None:

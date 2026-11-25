@@ -709,6 +709,7 @@ class RepositoryWorkspaceAuthority:
         *,
         expected_state_version: int,
         git: GitService | None = None,
+        expected_source_branch: str | None = None,
     ) -> tuple[WorkspaceState, CandidateCheckpoint]:
         """Materialize one mutable Git worktree without running repository checkout logic.
 
@@ -750,6 +751,11 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale(
                 "Candidate source repository must be clean before materialization"
             )
+        if (
+            expected_source_branch is not None
+            and source_observation.branch != expected_source_branch
+        ):
+            raise WorkspaceStateStale("Candidate source branch changed before materialization")
         if source_snapshot_identity(source_repository) != source_snapshot.identity:
             raise WorkspaceStateStale(
                 "Candidate source snapshot does not match clean repository source"

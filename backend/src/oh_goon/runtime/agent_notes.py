@@ -37,11 +37,21 @@ from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.time import utc_now
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from oh_goon.core.models.agent_providers import ResolvedAgentModel
+    from oh_goon.core.models.parallel_agent_work import ParallelAgentWorkIntent
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.runtime.execution.coordinator import ExecutionSession
     from oh_goon.runtime.journal import Journal
     from oh_goon.runtime.journal_view import JournalReadView
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedAgentNotes:
+    intent: ParallelAgentWorkIntent
+    source_path: Path
+    notes: tuple[AgentNote, ...]
 
 
 class AgentNotesStore:
@@ -77,6 +87,43 @@ class AgentNotesStore:
         """Operator projection. The caller owns group authorization."""
         with self._database.transaction() as connection:
             return _page_in(connection, work_id, after, redact=True)
+
+    def select_for_export(self, work_id: str, note_ids: tuple[int, ...]) -> SelectedAgentNotes:
+        """Read exact operator-redacted notes and their source from one database cut."""
+        from oh_goon.runtime.parallel_agent_work import _work_in
+
+        if (
+            not 1 <= len(note_ids) <= NOTE_PAGE_LIMIT
+            or any(type(item) is not int or not 1 <= item <= NOTE_TASK_LIMIT for item in note_ids)
+            or len(set(note_ids)) != len(note_ids)
+        ):
+            raise AgentNotesError("invalid_note_selection")
+        with self._database.transaction() as connection:
+            work = _work_in(connection, work_id)
+            if work is None or work.intent.work_id != work_id or not work.intent.notes_enabled:
+                raise AgentNotesError("notes_not_authorized")
+            if _expired_in(connection, work_id):
+                raise AgentNotesError("notes_expired")
+            placeholders = ",".join("?" for _ in note_ids)
+            rows = connection.execute(
+                "SELECT note_id, receipt_json, body FROM parallel_agent_notes "
+                f"WHERE work_id=? AND note_id IN ({placeholders}) ORDER BY note_id",
+                (work_id, *note_ids),
+            ).fetchall()
+            if len(rows) != len(note_ids):
+                raise AgentNotesError("note_selection_unavailable")
+            notes = []
+            for note_id, receipt_json, body in rows:
+                receipt = AgentNoteReceipt.model_validate_json(receipt_json)
+                if body is None or receipt.body_expired:
+                    raise AgentNotesError("notes_expired")
+                if receipt.note_id != note_id:
+                    raise AgentNotesError("note_selection_unavailable")
+                notes.append(AgentNote(receipt=receipt, body=redact_diagnostic_text(body)))
+            source_path = _selected_note_source(
+                self._journal.read_view_from_connection(connection), work.intent, notes
+            )
+            return SelectedAgentNotes(work.intent, source_path, tuple(notes))
 
     def receipt(self, work_id: str, run_id: str, request_id: str) -> AgentNoteReceipt | None:
         """Resolve an original writer request without retaining its write capability."""
@@ -310,6 +357,37 @@ class BoundAgentNotes:
             )
 
         self.session.mutate(acknowledge_in)
+
+
+def _selected_note_source(
+    view: JournalReadView, intent: ParallelAgentWorkIntent, notes: list[AgentNote]
+) -> Path:
+    authors = {note.receipt.author for note in notes}
+    members = {child.fleet_run_id for child in intent.children}
+    sources: set[Path] = set()
+    for author in authors:
+        if author.fleet_run_id not in members or author.repository_id != intent.repository_id:
+            raise AgentNotesError("note_source_unavailable")
+        detail = view.run_detail(author.fleet_run_id)
+        if detail is None or len(detail.run.targets) != 1:
+            raise AgentNotesError("note_source_unavailable")
+        repository = detail.run.targets[0]
+        target = detail.run.target
+        candidate = target.candidate_workspace if isinstance(target, FleetPlanTarget) else None
+        if (
+            candidate is None
+            or candidate.parallel_work_id != intent.work_id
+            or candidate.workspace.workspace_id != author.workspace_id
+            or candidate.workspace.base_revision != intent.base_revision
+            or candidate.source != intent.source
+            or repository.repository_id != intent.repository_id
+            or author.base_source_sha256 != intent.source.source_snapshot.sha256
+        ):
+            raise AgentNotesError("note_source_unavailable")
+        sources.add(repository.path)
+    if len(sources) != 1:
+        raise AgentNotesError("note_source_unavailable")
+    return sources.pop()
 
 
 def _expired_in(connection: sqlite3.Connection, work_id: str) -> bool:
