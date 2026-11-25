@@ -221,6 +221,37 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
     export_candidate.add_argument("--checkpoint-id", required=True)
     export_candidate.add_argument("--output", type=Path, required=True)
     export_candidate.add_argument("--json", action="store_true", dest="as_json")
+    advance = plan_subparsers.add_parser(
+        "advance-candidate", help="Publish exact verified bytes to an expected local branch tip"
+    )
+    advance.add_argument("fleet_run_id")
+    advance.add_argument("--advance-id", required=True)
+    advance.add_argument("--checkpoint-id", required=True)
+    advance.add_argument("--branch-owner", type=Path, required=True)
+    advance.add_argument("--workspace", type=Path, required=True)
+    advance.add_argument("--branch-ref", required=True)
+    advance.add_argument("--expected-tip", required=True)
+    advance.add_argument("--authorize", action="store_true", required=True)
+    advance.add_argument("--json", action="store_true", dest="as_json")
+    receipt = plan_subparsers.add_parser(
+        "branch-advance", help="Inspect the exact original branch advancement and successor ID"
+    )
+    receipt.add_argument("advance_id")
+    receipt.add_argument("--json", action="store_true", dest="as_json")
+    receipt.set_defaults(fleet_run_id=None)
+    start_round = plan_subparsers.add_parser(
+        "start-round", help="Start one fresh writable Pi Run from a verified branch advancement"
+    )
+    start_round.add_argument("advance_id")
+    start_round.add_argument("--profile", required=True)
+    start_round.add_argument("--config", type=Path)
+    start_round.add_argument("--skill", type=Path)
+    round_task = start_round.add_mutually_exclusive_group(required=True)
+    round_task.add_argument("--prompt")
+    round_task.add_argument("--prompt-file", type=Path)
+    start_round.add_argument("--authorize", action="store_true", required=True)
+    start_round.add_argument("--json", action="store_true", dest="as_json")
+    start_round.set_defaults(fleet_run_id=None)
     history = plan_subparsers.add_parser(
         "list", help="Page original Run history in the selected state root"
     )

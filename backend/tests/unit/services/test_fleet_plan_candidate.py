@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid, StateConflict, WorkspaceStateStale
+from oh_goon.core.errors import FleetPlanInvalid, RunNotFound, StateConflict, WorkspaceStateStale
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -21,11 +21,14 @@ from oh_goon.core.models.agent_providers import (
     AgentProvidersConfig,
     NativeAgentDefinition,
     NativeAgentProfile,
+    PiSessionIntent,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.branch_advance import PreparedBranchAdvance, branch_round_run_id
 from oh_goon.core.models.parallel_agent_work import ParallelAgentWorkRequest
 from oh_goon.core.models.parallel_candidate_verification import (
     FrozenVerifierInput,
+    ParallelCandidateVerification,
     ParallelCandidateVerifier,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -33,6 +36,7 @@ from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary.workspace import WorkspaceLifecycleState
 from oh_goon.engine.git import GitService
 from oh_goon.integrations import source_snapshot
+from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.parallel_agent_work import replay_parallel_work
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
@@ -258,9 +262,8 @@ def test_candidate_control_refuses_native_clean_filter_without_running_it(case, 
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("override", ["arguments", "configuration_directory"])
-def test_candidate_mode_refuses_unsupported_native_configuration_before_preparation(override):
-    selected = ResolvedNativeAgent(
+def _candidate_selection() -> ResolvedNativeAgent:
+    return ResolvedNativeAgent(
         agent="pi",
         profile_name="candidate",
         definition=NativeAgentDefinition(executable="/bin/true"),
@@ -278,6 +281,11 @@ def test_candidate_mode_refuses_unsupported_native_configuration_before_preparat
             "model",
         ),
     )
+
+
+@pytest.mark.parametrize("override", ["arguments", "configuration_directory"])
+def test_candidate_mode_refuses_unsupported_native_configuration_before_preparation(override):
+    selected = _candidate_selection()
     require_native_candidate_selection(selected)
     changes = (
         {"arguments": ("--session", "private")}
@@ -287,6 +295,163 @@ def test_candidate_mode_refuses_unsupported_native_configuration_before_preparat
     invalid = replace(selected, definition=selected.definition.model_copy(update=changes))
     with pytest.raises(FleetPlanInvalid, match="Candidate execution requires"):
         require_native_candidate_selection(invalid)
+
+
+@pytest.mark.parametrize(
+    ("advance_id", "error", "message"),
+    [
+        (None, FleetPlanInvalid, "original advancement inputs"),
+        ("missing", StateConflict, "published branch advancement"),
+    ],
+)
+def test_reserved_successor_refuses_without_published_branch_authority(
+    case: tuple[LocalDatabase, RepositoryService, RepositoryIdentity],
+    advance_id: str | None,
+    error: type[Exception],
+    message: str,
+) -> None:
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    database, repositories, repository = case
+    original_worktrees = _git(repository.path, "worktree", "list", "--porcelain")
+    runs = Mock()
+    service = FleetPlanService(
+        Mock(), runs, Mock(), Mock(), Mock(), repositories=repositories, workspace_database=database
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="candidate",
+        definition=NativeAgentDefinition(executable="/bin/true"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+        session=PiSessionIntent(mode="ephemeral"),
+    )
+    with pytest.raises(error, match=message):
+        service.run_native_agent(
+            selected=selected,
+            workspace=repository.path,
+            skill=None,
+            task="Edit this candidate",
+            fleet_run_id=branch_round_run_id("missing"),
+            candidate=True,
+            branch_advance_id=advance_id,
+        )
+    assert not runs.mock_calls
+    assert _git(repository.path, "worktree", "list", "--porcelain") == original_worktrees
+
+
+def test_successor_retry_preserves_published_source_and_original_authored_selection(
+    case: tuple[LocalDatabase, RepositoryService, RepositoryIdentity],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from oh_goon.services import fleet_plan_writable_round
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    database, repositories, repository = case
+    owner = tmp_path / "owner.git"
+    owner.mkdir()
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("# Reviewed task context\n", encoding="utf-8")
+    executable = Path("/usr/bin/true").resolve(strict=True)
+    verifier = ParallelCandidateVerifier(
+        acceptance="Check the exact candidate",
+        executable=str(executable),
+        executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
+        arguments=("{input:check}", "{candidate}"),
+        inputs=(
+            FrozenVerifierInput(name="check", content="", sha256=hashlib.sha256(b"").hexdigest()),
+        ),
+    )
+    previous = "a" * 40
+    previous_subject = repository_subject_instance_id(repository.path)
+    prepared = PreparedBranchAdvance(
+        advance_id="next-round",
+        request_sha256="1" * 64,
+        repository_path=repository.path,
+        repository_id=repository.repository_id,
+        checkout_identity=RepositoryWorkspaceAuthority.receiving_checkout_identity(repository.path),
+        branch_owner_path=owner,
+        branch_owner_subject_id=repository_subject_instance_id(owner),
+        branch_ref="refs/heads/agent",
+        expected_tip=previous,
+        commit="b" * 40,
+        tree="c" * 40,
+        patch_sha256="d" * 64,
+        verification=ParallelCandidateVerification(
+            fleet_run_id="prior-run",
+            parallel_work_id="original-work",
+            workspace_id="prior-workspace",
+            base_revision=previous,
+            base_source_id="prior-source",
+            verifier_id=verifier.identity,
+            checkpoint_id="verified-checkpoint",
+            source_sha256="e" * 64,
+            result_identity="verified-result",
+            physical_execution_id="native-verifier",
+            native_outcome="PASS",
+            outcome="PASS",
+            reason="Passed",
+        ),
+        source_byte_count=30,
+        source_entry_count=2,
+    )
+    store = BranchAdvanceStore(database)
+    store.prepare(prepared)
+    store.confirm(prepared, observed_tip=prepared.commit)
+    runs = Mock()
+    runs.get.side_effect = RunNotFound("No Run admitted before contact loss")
+    service = FleetPlanService(
+        Mock(),
+        runs,
+        Mock(),
+        Mock(),
+        Mock(),
+        standard_local_fleet=True,
+        repositories=repositories,
+        workspace_database=database,
+    )
+    launched = Mock(side_effect=OSError("Interrupted before Run admission"))
+
+    def synchronize(*_args: object, **_kwargs: object) -> None:
+        (repository.path / "synchronized.py").write_text("updated\n", encoding="utf-8")
+
+    sync = Mock(side_effect=synchronize)
+    monkeypatch.setattr(service, "run_native_agent", launched)
+    monkeypatch.setattr(fleet_plan_writable_round, "sync_branch_checkout", sync)
+    monkeypatch.setattr(
+        fleet_plan_writable_round, "read_parallel_verifier", Mock(return_value=verifier)
+    )
+
+    def start(task: str) -> None:
+        service.start_writable_round(
+            advance_id=prepared.advance_id,
+            selected=_candidate_selection(),
+            workspace=repository.path,
+            skill=skill,
+            task=task,
+        )
+
+    with pytest.raises(OSError, match="Interrupted before Run admission"):
+        start("Use the reviewed task context")
+    receipt = store.find(prepared.advance_id)
+    assert receipt is not None and receipt.next_run is not None
+    assert receipt.next_run.fleet_run_id == branch_round_run_id(prepared.advance_id)
+    assert receipt.next_run.repository_subject_id == repository_subject_instance_id(repository.path)
+    assert receipt.next_run.repository_subject_id != previous_subject
+    assert (
+        RepositoryWorkspaceAuthority.receiving_checkout_identity(repository.path)
+        == prepared.checkout_identity
+    )
+    assert sync.call_args.kwargs["prepared"].commit == prepared.commit
+    assert sync.call_args.kwargs["candidate_identity"].sha256 == prepared.verification.source_sha256
+    assert launched.call_args.kwargs["fleet_run_id"] == receipt.next_run.fleet_run_id
+    assert launched.call_args.kwargs["skill"] == skill
+    assert launched.call_args.kwargs["selected"].session == PiSessionIntent(mode="ephemeral")
+    with pytest.raises(StateConflict, match="different successor"):
+        start("Replace the previously authorized task")
+    sync.assert_called_once()
+    launched.assert_called_once()
 
 
 def test_parallel_work_refuses_a_selected_key_file_before_snapshot_and_admission(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -14,6 +15,13 @@ from oh_goon.integrations.source_snapshot import snapshot_source_directory, sour
 MAX_PARALLEL_PATCH_BYTES = 16 * 1024 * 1024
 _MAX_PATH_INVENTORY_BYTES = 4 * 1024 * 1024
 _NATIVE_OBJECT_ID = re.compile(r"[a-f0-9]{40}|[a-f0-9]{64}")
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCandidatePatch:
+    path: Path
+    changed_paths: tuple[str, ...]
+    tree: str
 
 
 def _git(git: GitService, cwd: Path, *arguments: str) -> str:
@@ -53,7 +61,7 @@ def prepare_native_candidate_patch(
     base_identity: SnapshotIdentity,
     candidate_identity: SnapshotIdentity,
     scratch: Path,
-) -> tuple[Path, tuple[str, ...]]:
+) -> NativeCandidatePatch:
     """Use native Git and a reconstruction to account for the exact changed sources."""
     if _NATIVE_OBJECT_ID.fullmatch(original_revision) is None:
         raise FleetPlanInvalid("Candidate base has no admitted native revision")
@@ -137,4 +145,4 @@ def prepare_native_candidate_patch(
         or source_snapshot_identity(replay, reject_dotenv_state=True) != candidate_identity
     ):
         raise FleetPlanInvalid("Native candidate patch does not reconstruct the verified source")
-    return patch, paths
+    return NativeCandidatePatch(patch, paths, candidate_tree)

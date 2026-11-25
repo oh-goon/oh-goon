@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import yaml
 
@@ -44,6 +44,7 @@ from oh_goon.core.models.agent_repair import (
 from oh_goon.core.models.agent_repair import (
     AgentRepairStopReason as RepairStop,
 )
+from oh_goon.core.models.branch_advance import is_branch_round_run_id
 from oh_goon.core.models.caller_input_file import (
     CallerInputFileIdentity,
     ScheduledCallerFileReceipt,
@@ -129,6 +130,26 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
+
+
+class _BranchAdvanceAdmission(TypedDict, total=False):
+    branch_advance_id: str
+
+
+def require_native_task(task: str) -> None:
+    if (
+        type(task) is not str
+        or not task.strip()
+        or "\x00" in task
+        or len(task) > MAX_AGENT_TASK_CHARS
+    ):
+        raise FleetPlanInvalid(
+            f"Native task requires 1 to {MAX_AGENT_TASK_CHARS} authored characters without NUL"
+        )
+    try:
+        task.encode("utf-8")
+    except UnicodeError:
+        raise FleetPlanInvalid("Native task must be valid UTF-8") from None
 
 
 def _native_prior_context(value: str | None) -> str | None:
@@ -325,6 +346,26 @@ class FleetPlanService:
 
         return start_parallel_agent_work(self, request, selected=selected)
 
+    def start_writable_round(
+        self,
+        *,
+        advance_id: str,
+        selected: ResolvedNativeAgent,
+        workspace: Path,
+        skill: Path | None,
+        task: str,
+    ) -> FleetRunState:
+        from oh_goon.services.fleet_plan_writable_round import start_writable_round
+
+        return start_writable_round(
+            self,
+            advance_id=advance_id,
+            selected=selected,
+            workspace=workspace,
+            skill=skill,
+            task=task,
+        )
+
     def run_native_agent(
         self,
         *,
@@ -344,6 +385,7 @@ class FleetPlanService:
         parallel_work_id: str | None = None,
         expected_candidate_base_revision: str | None = None,
         expected_candidate_branch: str | None = None,
+        branch_advance_id: str | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -354,6 +396,51 @@ class FleetPlanService:
         read_only_agent = role != "report" or selected.continues_pi_session
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
+        require_native_task(task)
+        branch_arguments: _BranchAdvanceAdmission = {}
+        reserved_round_id = fleet_run_id is not None and is_branch_round_run_id(fleet_run_id)
+        if branch_advance_id is not None or reserved_round_id:
+            from oh_goon.services.fleet_plan_writable_round import require_writable_round_source
+
+            if (
+                branch_advance_id is None
+                or fleet_run_id is None
+                or not reserved_round_id
+                or not candidate
+                or role != "report"
+                or verification
+                or verification_timeouts
+                or any(
+                    value is not None
+                    for value in (
+                        parallel_work_id,
+                        reviewed_repository_source,
+                        expected_repository_instance_ids,
+                        expected_candidate_base_revision,
+                        expected_candidate_branch,
+                        prior_context,
+                        continuation_receipt,
+                    )
+                )
+            ):
+                raise FleetPlanInvalid(
+                    "Writable branch Run requires its original advancement inputs"
+                )
+            prepared, reviewed_repository_source, verifier = require_writable_round_source(
+                self,
+                advance_id=branch_advance_id,
+                fleet_run_id=fleet_run_id,
+                selected=selected,
+                workspace=workspace,
+                skill=skill,
+                task=task,
+            )
+            branch_arguments["branch_advance_id"] = branch_advance_id
+            verification = (verifier.argv,)
+            expected_candidate_base_revision = prepared.commit
+            expected_repository_instance_ids = {
+                prepared.repository_id: reviewed_repository_source.subject_instance_id
+            }
         if expected_candidate_branch is not None and (
             not candidate or expected_candidate_base_revision is None
         ):
@@ -382,19 +469,6 @@ class FleetPlanService:
             )
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid("Native Agent hosting requires ordinary Fleet execution")
-        if (
-            type(task) is not str
-            or not task.strip()
-            or "\x00" in task
-            or len(task) > MAX_AGENT_TASK_CHARS
-        ):
-            raise FleetPlanInvalid(
-                f"Native task requires 1 to {MAX_AGENT_TASK_CHARS} authored characters without NUL"
-            )
-        try:
-            task.encode("utf-8")
-        except UnicodeError:
-            raise FleetPlanInvalid("Native task must be valid UTF-8") from None
         context = _native_prior_context(prior_context)
         if verification_timeouts and len(verification_timeouts) != len(verification):
             raise FleetPlanInvalid("Native verification timeouts must match selected commands")
@@ -404,6 +478,7 @@ class FleetPlanService:
             )
         self.require_plan_ingress_preparation(fleet_run_id)
         workspace = workspace.resolve(strict=True)
+        registered_workspace = workspace
         if role not in {"report", "review"}:
             raise FleetPlanInvalid("Adjudication/proposal requires the original bounded campaign")
         if selected.interactive and (self._terminal is None or role != "report"):
@@ -526,6 +601,15 @@ class FleetPlanService:
                         for index, argv in enumerate(verification, 1)
                     ),
                 ]
+                if branch_advance_id is not None:
+                    from oh_goon.core.models.parallel_candidate_verification import (
+                        BASELINE_VERIFIER_STEP_ID,
+                    )
+
+                    steps.insert(
+                        0,
+                        {"id": BASELINE_VERIFIER_STEP_ID, "run": shlex.join(verification[0])},
+                    )
                 payload = {
                     "inputs": {
                         "repo": {"type": "repository_reference"},
@@ -574,6 +658,20 @@ class FleetPlanService:
                         native_agent=plan.native_agent,
                     )
                 write_execution_lock(root / LOCK_FILE_NAME, build_execution_lock(plan))
+                if branch_advance_id is not None:
+                    from oh_goon.services.fleet_plan_candidate import (
+                        require_branch_round_candidate,
+                        require_current_branch_round_tip,
+                    )
+
+                    assert self._workspace_database is not None
+                    assert candidate_admission is not None and capture_git is not None
+                    receipt = require_branch_round_candidate(
+                        self._workspace_database,
+                        candidate_admission,
+                        repository=registered_workspace,
+                    )
+                    require_current_branch_round_tip(receipt, git=capture_git)
                 target = self._agent_target(
                     plan,
                     deliveries,
@@ -591,6 +689,7 @@ class FleetPlanService:
                     source=FleetRunSource.MANUAL,
                     created_agent_deliveries=target.agent_deliveries,
                     expected_repository_instance_ids=expected_repository_instance_ids,
+                    **branch_arguments,
                 )
 
         except BaseException as error:

@@ -67,6 +67,12 @@ class ApplicationStatePathLayout:
         return self.root / "executor-control"
 
     @property
+    def branch_handoff_locks(self) -> Path:
+        """Private, bounded kernel-lock files for receiving checkout handoffs."""
+
+        return self.root / ".branch-run-locks"
+
+    @property
     def local_launches(self) -> Path:
         """Private per-launch structured facts; not a process or authority registry."""
 
@@ -97,6 +103,7 @@ class ApplicationStatePathLayout:
             self.content_store,
             self.pi_sessions,
             self.executor_control,
+            self.branch_handoff_locks,
             self.local_launches,
             self.local_launch_bindings,
             self.local_launch_access,

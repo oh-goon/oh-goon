@@ -156,6 +156,34 @@ class RepositoryWorkspaceAuthority:
         )
 
     @staticmethod
+    def receiving_checkout_identity(repository: Path) -> str:
+        """Bind a checkout across tracked-file replacement using its unchanged Git storage."""
+        root = canonical_path(repository)
+        root_stat = root.lstat()
+        git = root / ".git"
+        git_stat = git.lstat()
+        if root != repository or any(
+            not stat.S_ISDIR(entry.st_mode) for entry in (root_stat, git_stat)
+        ):
+            raise WorkspaceStateStale("Branch handoff requires an independent Git checkout")
+        config = (git / "config").lstat()
+        if not stat.S_ISREG(config.st_mode) or config.st_nlink != 1:
+            raise WorkspaceStateStale(
+                "Branch handoff requires the checkout's own native Git config"
+            )
+        # Native checkout replaces root directory entries. Its Git config inode
+        # and ctime remain the witness against a recreated root or Git directory.
+        return stable_id(
+            "receiving-checkout",
+            {
+                "path": str(root),
+                "root": (root_stat.st_dev, root_stat.st_ino, root_stat.st_mode),
+                "git": (git_stat.st_dev, git_stat.st_ino, git_stat.st_mode),
+                "config": (config.st_dev, config.st_ino, config.st_mode, config.st_ctime_ns),
+            },
+        )
+
+    @staticmethod
     @contextmanager
     def pin_repository_subject(repository: Path) -> Generator[Callable[[], None], None, None]:
         """Hold native root/Git handles across authorized edits without freezing directory ctime.

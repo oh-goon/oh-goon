@@ -12,6 +12,7 @@ from oh_goon.core.execution_lock_identity import (
 from oh_goon.core.models.agent_continuation_receipt import AgentContinuationReceipt
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.branch_advance import is_branch_round_run_id
 from oh_goon.core.models.caller_input_file import (
     CallerInputFileIdentity,
     ScheduledCallerFileReceipt,
@@ -24,6 +25,10 @@ from oh_goon.core.models.execution_identity import (
 from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.goon_plan_source import FleetPlanSource
+from oh_goon.core.models.parallel_candidate_verification import (
+    is_baseline_verifier_step_id,
+    is_parallel_verifier_step_id,
+)
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.vocabulary import MigrationMode, UvRecipeId
 
@@ -239,6 +244,20 @@ class FleetPlanTarget(ImmutableModel):
         candidate = self.candidate_workspace
         if candidate is not None:
             native = self.plan.native_agent
+            steps = self.plan.steps
+            if is_branch_round_run_id(candidate.fleet_run_id):
+                if (
+                    candidate.parallel_work_id is not None
+                    or len(steps) != 3
+                    or not isinstance(baseline := steps[0], ResolvedCommandStep)
+                    or not is_baseline_verifier_step_id(baseline.step_id)
+                    or baseline.project_source is not None
+                    or not isinstance(final := steps[2], ResolvedCommandStep)
+                    or not is_parallel_verifier_step_id(final.step_id)
+                    or final.argv != baseline.argv
+                ):
+                    raise ValueError("Writable branch candidate requires its two frozen checks")
+                steps = steps[1:]
             if (
                 self.agent_repair is not None
                 or native is None
@@ -249,13 +268,13 @@ class FleetPlanTarget(ImmutableModel):
                 or native.connection is None
                 or native.definition.arguments
                 or native.definition.configuration_directory is not None
-                or not self.plan.steps
-                or not isinstance(self.plan.steps[0], ResolvedAgentStep)
-                or self.plan.steps[0].workload.harness != "native"
-                or self.plan.steps[0].workload.role != "report"
+                or not steps
+                or not isinstance(steps[0], ResolvedAgentStep)
+                or steps[0].workload.harness != "native"
+                or steps[0].workload.role != "report"
                 or any(
                     not isinstance(step, ResolvedCommandStep) or step.project_source is not None
-                    for step in self.plan.steps[1:]
+                    for step in steps[1:]
                 )
                 or self.reviewed_repository_source != candidate.source
             ):

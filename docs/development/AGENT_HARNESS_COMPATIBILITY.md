@@ -81,6 +81,13 @@ stay on their existing task-scoped tools, and a selected Markdown export adds no
 native extension. Other hosts, persistent sessions and live models need their
 own evidence. [Scheduled review proof](../../backend/tests/integration/services/test_native_review_schedule_cli.py) · [Live note proof](../../backend/tests/integration/services/test_native_parallel_agent_notes.py)
 
+**Retain** the same ephemeral Pi, managed broker and workspace isolation
+adaptations for writable branch rounds. The dedicated native Git owner publishes
+the verified commit before fresh Fleet admission. The original Step lifecycle
+checks the receiving source before the Agent starts and checks the candidate
+afterward. No native session or tool configuration crosses the handoff.
+[Installed writable round proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
 ## Frozen context continuity — 2026-11-05
 
 [HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths

@@ -108,6 +108,22 @@ CREATE TABLE IF NOT EXISTS parallel_agent_note_expiry (
     expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS branch_advances (
+    advance_id TEXT PRIMARY KEY,
+    branch_owner_subject_id TEXT NOT NULL,
+    branch_ref TEXT NOT NULL,
+    expected_tip TEXT NOT NULL,
+    preparation_json TEXT NOT NULL CHECK (json_valid(preparation_json)),
+    published_at TEXT,
+    next_fleet_run_id TEXT UNIQUE,
+    next_request_sha256 TEXT,
+    next_repository_subject_id TEXT,
+    UNIQUE (branch_owner_subject_id, branch_ref, expected_tip),
+    CHECK ((next_fleet_run_id IS NULL) = (next_request_sha256 IS NULL)),
+    CHECK (next_fleet_run_id IS NULL OR published_at IS NOT NULL),
+    CHECK (next_repository_subject_id IS NULL OR next_fleet_run_id IS NOT NULL)
+);
+
 CREATE TABLE IF NOT EXISTS executor_placement_queue (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     fleet_run_id TEXT NOT NULL UNIQUE,

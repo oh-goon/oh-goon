@@ -74,7 +74,10 @@ from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_strict_policy_enrollment import StrictFleetPolicyEnrollment
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
     from oh_goon.core.models.fleet_plan import ResolvedPlanStep
     from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
@@ -208,6 +211,15 @@ class FleetRunLifecycle:
         """Serialize one caller-stable admission identity without creating durable state."""
         with serialize_run_admission(self._database.path, identity):
             yield
+
+    def require_writable_round_candidate(
+        self, admission: CandidateWorkspaceAdmission, repository: Path, advance_id: str
+    ) -> None:
+        from oh_goon.services.fleet_plan_candidate import require_branch_round_candidate
+
+        receipt = require_branch_round_candidate(self._database, admission, repository)
+        if receipt.preparation.advance_id != advance_id:
+            raise StateConflict("Writable round differs from its recorded branch advancement")
 
     def require_cli_plan_preparation(self, run_id: str | None) -> None:
         """Retain the CLI spelling while sharing one pre-resolution ingress owner."""

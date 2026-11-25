@@ -186,6 +186,8 @@ def run_parallel_agent_command(args: argparse.Namespace) -> int:
     try:
         if args.runs_command == "start-parallel":
             return _start(args)
+        if args.runs_command in {"advance-candidate", "branch-advance", "start-round"}:
+            return _branch_command(args)
         if args.runs_command == "cancel-parallel":
             result = cancel_parallel_work(
                 _existing_database(write=True), args.work_id, fleet_run_id=args.fleet_run_id
@@ -206,6 +208,97 @@ def run_parallel_agent_command(args: argparse.Namespace) -> int:
 
         print_safe_plan_diagnostic(exc, as_json=args.as_json)
         return 2
+
+
+def _branch_command(args: argparse.Namespace) -> int:
+    from oh_goon.runtime.branch_advances import BranchAdvanceStore
+    from oh_goon.services.branch_advance import BranchAdvanceRequest, advance_verified_candidate
+
+    if args.runs_command == "advance-candidate":
+        request = BranchAdvanceRequest(
+            advance_id=args.advance_id,
+            fleet_run_id=args.fleet_run_id,
+            checkpoint_id=args.checkpoint_id,
+            branch_owner=args.branch_owner,
+            workspace=args.workspace,
+            branch_ref=args.branch_ref,
+            expected_tip=args.expected_tip,
+        )
+        database = _existing_database(write=True)
+        runtime = ApplicationRuntime.build(standard_local=True, startup_purpose="workflow")
+        try:
+            receipt = advance_verified_candidate(
+                request, database=database, repositories=runtime.repositories
+            )
+        finally:
+            runtime.shutdown()
+    else:
+        observed = BranchAdvanceStore(_existing_database()).find(args.advance_id)
+        if observed is None:
+            raise StateConflict("Unknown branch advancement")
+        receipt = observed
+        if args.runs_command == "start-round":
+            if receipt.published_at is None:
+                raise StateConflict("Next Run requires a confirmed branch advancement")
+            return _start_round(args, receipt.preparation.repository_path)
+    if args.as_json:
+        print(receipt.model_dump_json())
+    else:
+        prepared = receipt.preparation
+        state = "Published" if receipt.published_at is not None else "Prepared"
+        print(f"{state} {prepared.advance_id} · {prepared.branch_ref} · {prepared.commit}")
+        if receipt.next_run is not None:
+            print(f"Next Fleet Run ID: {receipt.next_run.fleet_run_id}")
+    return 0
+
+
+def _start_round(args: argparse.Namespace, workspace: Path) -> int:
+    import json
+
+    from oh_goon.cli_ai import _task, resolve_native_cli_selection
+    from oh_goon.cli_result import CliTermination
+    from oh_goon.core.models.agent_providers import PiSessionIntent
+
+    task = _task(args)
+    skill = args.skill.expanduser().absolute() if args.skill is not None else None
+    selected, isolation, git = resolve_native_cli_selection(
+        agent="pi",
+        profile=args.profile,
+        workspace=workspace,
+        config_file=args.config,
+        session=PiSessionIntent(mode="ephemeral"),
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=isolation, git_service=git
+    )
+    try:
+        run = runtime.plans.start_writable_round(
+            advance_id=args.advance_id,
+            selected=selected,
+            workspace=workspace,
+            skill=skill,
+            task=task,
+        )
+        print(f"Fleet Run ID: {run.fleet_run_id}", file=sys.stderr)
+        try:
+            detail = runtime.runs.wait_for_terminal(run.fleet_run_id)
+        except KeyboardInterrupt as interruption:
+            runtime.runs.cancel(run.fleet_run_id)
+            runtime.runs.wait_for_terminal(run.fleet_run_id)
+            return 143 if isinstance(interruption, CliTermination) else 130
+        result = {
+            "advance_id": args.advance_id,
+            "fleet_run_id": run.fleet_run_id,
+            "status": detail.run.status.value,
+            "outcome": detail.outcome.value,
+        }
+        if args.as_json:
+            print(json.dumps(result))
+        else:
+            print(f"{detail.run.status.value} · {detail.outcome.value}")
+        return 0 if detail.outcome is FleetRunOutcome.SUCCESS else 1
+    finally:
+        runtime.shutdown()
 
 
 def _notes_command(args: argparse.Namespace) -> int:

@@ -655,6 +655,44 @@ transfer and fresh admission under its tool and model policy.
 For repeated read-only reviews of one captured repository source, use the
 [existing Schedule owner](AUTOMATION_MODEL.md#recurring-native-reviews).
 
+#### Advance a local agent branch and start a writable round
+
+Select a dedicated bare local Git repository with an existing agent branch and a
+separate registered clone checked out, detached and clean, at the same commit.
+Use a receiving clone separate from the original parallel task's checkout. The
+bare repository owns the named branch. The receiving clone supplies the source
+for fresh detached candidates. Use the same local Oh-Goon state for the original
+verification, branch receipt and successor Runs.
+
+```sh
+oh-goon runs advance-candidate VERIFIED_RUN_ID \
+  --advance-id approach-a-001 --checkpoint-id VERIFIED_CHECKPOINT_ID \
+  --branch-owner /private/agent-branches.git --workspace /private/agent-checkout \
+  --branch-ref refs/heads/agents/approach-a --expected-tip PREVIOUS_COMMIT \
+  --authorize --json
+
+oh-goon runs branch-advance approach-a-001 --json
+
+oh-goon runs start-round approach-a-001 --profile isolated-managed \
+  --config /private/providers.json --prompt-file /private/next-task.txt \
+  --skill /private/shared-task/review-skill --authorize --json
+```
+
+Branch advancement prepares an exact verified Git tree and records its new commit
+before changing the ref. Git moves the branch from the expected tip and writes
+the publication witness in one transaction. After an interrupted command,
+inspect its advancement ID or retry the exact request. Conflicting requests and
+an externally moved ref are refused. A prepared receipt remains available for
+inspection until its publication can be confirmed.
+
+Starting the next round binds one authored task and native selection to one
+durable Run ID, synchronizes the receiving clone to the confirmed commit, and
+checks its exact source. The new Run executes the original frozen verifier on
+that source before the fresh Pi session can edit its candidate. The same verifier
+checks the resulting candidate independently. Inspect `runs verify-candidate`
+for the exact result. A passing successor can advance the same branch with a new
+advancement ID and the previous receipt's commit as the expected tip.
+
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,
 uncertain namespace/writer facts and lost acknowledgements retain their own

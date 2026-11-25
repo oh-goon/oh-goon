@@ -538,6 +538,7 @@ class FleetRunControlPlane:
         expected_repository_instance_ids: dict[str, str] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         created_agent_deliveries: tuple[AgentStepDeliveryReference, ...] = (),
+        branch_advance_id: str | None = None,
     ) -> FleetRunState:
         """Start only a Fleet Plan target already frozen by FleetPlanService."""
         if created_agent_deliveries and (
@@ -561,6 +562,7 @@ class FleetRunControlPlane:
                 readmitted_from_run_id=None,
                 rerun_from_run_id=None,
                 requested_priority=requested_priority,
+                branch_advance_id=branch_advance_id,
             )
         except BaseException as exc:
             failure = exc
@@ -707,10 +709,27 @@ class FleetRunControlPlane:
         rerun_from_run_id: str | None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         schedule_run_id: str | None = None,
+        branch_advance_id: str | None = None,
     ) -> FleetRunState:
         # Fail before repository planning or lease attempts when deployment
         # explicitly requires signed Fleet admission but has no trust binding.
         fleet_run_id = fleet_run_id or new_fleet_run_id()
+        from oh_goon.core.models.branch_advance import branch_round_run_id, is_branch_round_run_id
+
+        if branch_advance_id is not None or is_branch_round_run_id(fleet_run_id):
+            if (
+                branch_advance_id is None
+                or branch_round_run_id(branch_advance_id) != fleet_run_id
+                or source is not FleetRunSource.MANUAL
+                or readmitted_from_run_id is not None
+                or rerun_from_run_id is not None
+                or not isinstance(intent.target, FleetPlanTarget)
+                or intent.target.candidate_workspace is None
+                or intent.target.candidate_workspace.fleet_run_id != fleet_run_id
+                or not isinstance(repository_scope, ExplicitRepositoryScope)
+                or len(repository_scope.repository_ids) != 1
+            ):
+                raise StateConflict("Writable round requires its original branch advancement")
 
         def require_scheduled_child() -> None:
             if source is not FleetRunSource.SCHEDULED:
@@ -812,6 +831,13 @@ class FleetRunControlPlane:
                 expected_repository_instance_ids=expected_repository_instance_ids,
                 **concurrent_planning,
             )
+            if branch_advance_id is not None:
+                assert isinstance(intent.target, FleetPlanTarget)
+                assert intent.target.candidate_workspace is not None
+                (entry,) = plan.targets
+                self._lifecycle.require_writable_round_candidate(
+                    intent.target.candidate_workspace, entry.repository.path, branch_advance_id
+                )
             if (
                 source is FleetRunSource.SCHEDULED
                 and isinstance(intent.target, FleetPlanTarget)

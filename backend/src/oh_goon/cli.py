@@ -753,6 +753,9 @@ def _main(
         "parallel-work",
         "cancel-parallel",
         "parallel-notes",
+        "advance-candidate",
+        "branch-advance",
+        "start-round",
     }:
         from oh_goon.cli_parallel_agents import run_parallel_agent_command
 

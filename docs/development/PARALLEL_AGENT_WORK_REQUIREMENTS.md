@@ -261,13 +261,21 @@ Pausing prevents new admissions. Existing Runs settle through their original
 owners. The operator selects the branch, commit and reviewed Skill for a fresh
 writable candidate through the [named-branch handoff](../AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
 
+The [local writable round](../AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
+binds the selected predecessor, published branch commit and receiving source to
+the original Fleet admission. The dedicated bare repository holds the branch and
+its native publication witness. The separate registered checkout supplies exact
+detached source. Replaying the same request reopens its original receipt or Run.
+The successor runs the frozen baseline and outgoing verifiers in its own Step
+lifecycle. A verified result may authorize another advance on the same lineage.
+
 Advance unattended collaboration in this order and verify each boundary on the
 selected environment.
 
 | Boundary | Required behavior and proof |
 | --- | --- |
-| Writable recurrence | Give each agent its own selected branch and expected commit. Bind the approved predecessor, fresh source capture and reviewed documents to the original Fleet admission. After crashes or ambiguous acknowledgement, inspect the original Run and branch receipt before advancing a round. Prove stale branch, changed commit, unverified patch and unknown writer refuse. |
-| Branch advancement | Use native Git in the branch's owning clone. Require the exact verified change and expected previous tip, rerun acceptance on the receiving source, and retain the final commit and verification result. Prove that interrupted publication or a concurrent tip change cannot authorize a duplicate apply. |
+| Writable round selection | Choose the next task and reviewed documents explicitly and inspect the original Run before advancing. A timed writable workflow needs a selection policy that can authorize those inputs and decide which verified candidate advances the branch. |
+| Branch advancement recovery | Preserve the exact local Git witness and original SQLite receipt across restart or acknowledgement loss. Prove stale refs, changed requests and unverified candidates refuse. Preserve a refusal when the original publication cannot be established. |
 | A second environment | Give each runtime its own registration, state, tool configuration and model authorization. Transfer explicit Git source and selected task documents. Demonstrate fresh repository evidence and native verification there, with controlled restart or loss of either environment. Remote publication and model egress follow their independently authorized owner. |
 | Cross-environment live notes | Admit task membership and note recipients on each worker, then prove simultaneous attributed delivery, cancellation fencing and retention on the selected transport. An exported document remains a practical handoff when no cross-host delivery is qualified. |
 
