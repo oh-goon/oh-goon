@@ -205,9 +205,13 @@ Pi verifies the exact native session and active leaf before receiving the
 new task. The continuing Agent has the
 built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
 mount. The writer receives only the selected private session file. The
-original Journal records the predecessor and fences a second writer. A failed
-or interrupted reservation may leave the lineage unavailable for another
-reopen. Read the recorded session, cleanup, and independent verifier evidence with
+original Journal records the predecessor and fences a second managed writer.
+Same-user processes outside the Run can still edit the file. Oh-Goon checks
+the exact saved bytes before launch and the predecessor prefix plus Pi's
+reported append after the writer exits. A detected change leaves the save
+unqualified. A failed or interrupted reservation may leave the lineage
+unavailable for another reopen. Read the recorded session, cleanup, and
+independent verifier evidence with
 `runs handoff`, `runs outputs`, `runs events`, or `runs tape`. Persistent
 `ai --json` returns the same bounded handoff as `runs handoff --json`.
 A history read uses the recorded evidence from the selected runtime.

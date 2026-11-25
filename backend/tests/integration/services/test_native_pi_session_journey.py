@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -45,6 +45,7 @@ from oh_goon.core.models.run_events import (
     PiSessionWriterReservedEvent,
     ProcessExitedEvent,
     ProcessStartedEvent,
+    ProcessStartingEvent,
     ProcessStateUnknownEvent,
     StepAttemptCreatedEvent,
     StepFailedEvent,
@@ -62,6 +63,11 @@ from oh_goon.core.vocabulary import (
     ScheduleRepositoryRunStatus,
     ScheduleState,
 )
+from oh_goon.engine.command import CommandResult
+from oh_goon.integrations.fleet_plan_process_isolation import (
+    StandardIsolatedProcessRequest,
+    StandardReadOnlyMount,
+)
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
@@ -69,12 +75,15 @@ from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.journal import Journal
 from tests.fakes.native_protocol import observe_native_protocol
+from tests.integration.services.test_native_pi_session_protocol import _PiProbe, _state
+from tests.integration.services.test_native_pi_session_protocol import pi_probe as pi_probe
 
 _SECRET = "synthetic-pi-journey-broker-key"
 _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
 _TOOL_CALL_ID = "call-private-journey-tool"
 _TOOL_EFFECT = "native tool effect\n"
 _MODEL_REPLY = "The requested review is complete."
+_UNMANAGED_PI_REPLY = "The requested review is disputed."
 _PI_REOPEN_EXIT_CODE = 23
 _SEED_SKILL = "# Session journey Skill\nReview the selected source.\n"
 _REOPENED_SKILL = "# Reopened review Skill\nInspect the current value before reporting.\n"
@@ -1881,10 +1890,52 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         )
 
 
+def _change_pi_reply_in_place(path: Path, original: bytes) -> bytes:
+    prior = _MODEL_REPLY.encode()
+    replacement = _UNMANAGED_PI_REPLY.encode()
+    assert len(prior) == len(replacement) and original.count(prior) == 1
+    offset = original.index(prior)
+    assert offset > original.index(b"\n")
+    before = path.stat()
+    assert before.st_size == len(original)
+    # This same-user process has only the synthetic file path, with no Run lease.
+    subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys\n"
+            "path, offset, old, new = sys.argv[1:]\n"
+            "with open(path, 'r+b', buffering=0) as stream:\n"
+            "    stream.seek(int(offset))\n"
+            "    assert stream.read(len(old.encode())) == old.encode()\n"
+            "    stream.seek(int(offset))\n"
+            "    assert stream.write(new.encode()) == len(new.encode())\n",
+            str(path),
+            str(offset),
+            _MODEL_REPLY,
+            _UNMANAGED_PI_REPLY,
+        ),
+        env={},
+        check=True,
+        timeout=10,
+    )
+    changed = original.replace(prior, replacement)
+    after = path.stat()
+    assert (after.st_dev, after.st_ino, after.st_size) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+    )
+    with path.open("rb") as stream:
+        assert stream.read(len(original) + 1) == changed
+    return changed
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("change", ["empty", "malformed", "legacy", "foreign-header"])
+@pytest.mark.parametrize("change", ["empty", "malformed", "legacy", "foreign-header", "message"])
 def test_managed_pi_refuses_changed_session_bytes_before_native_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str, request: pytest.FixtureRequest
 ) -> None:
     with _held_pi_journey(
         tmp_path, monkeypatch, hold_request_number=3, reply_after_hold=True
@@ -1913,6 +1964,9 @@ def test_managed_pi_refuses_changed_session_bytes_before_native_open(
             changed = b""
         elif change == "malformed":
             changed = b"not a native session\n"
+        elif change == "message":
+            changed = _change_pi_reply_in_place(transcript, current)
+            assert changed.split(b"\n", 1)[0] == header_bytes
         else:
             if change == "legacy":
                 header["version"] = 2
@@ -1922,7 +1976,40 @@ def test_managed_pi_refuses_changed_session_bytes_before_native_open(
             changed = json.dumps(header, separators=(",", ":")).encode() + b"\n" + entries
             assert len(changed) == len(current)
         assert changed != current
-        transcript.write_bytes(changed)
+        if change == "message":
+            assert seed.pi_session.native is not None
+            assert journal.inspect_pi_session(seed_id).refusal_code == (
+                PiSessionRefusalCode.HISTORY_UNQUALIFIED
+            )
+            probe: _PiProbe = request.getfixturevalue("pi_probe")
+            assert header["cwd"] == str(journey.repository)
+            saved_cwd = StandardReadOnlyMount(journey.repository, PurePosixPath(header["cwd"]))
+            execute = probe.backend.execute
+
+            def execute_with_saved_cwd(
+                isolated: StandardIsolatedProcessRequest, **options: Any
+            ) -> CommandResult:
+                return execute(
+                    replace(isolated, read_only_mounts=(*isolated.read_only_mounts, saved_cwd)),
+                    **options,
+                )
+
+            probe.session.write_bytes(changed)
+            with monkeypatch.context() as scoped:
+                scoped.setattr(probe.backend, "execute", execute_with_saved_cwd)
+                state, native_entries = _state(probe)
+            assert state["sessionId"] == seed.pi_session.native.session_id == header["id"]
+            assert native_entries["leafId"] == seed.pi_session.native.leaf_id
+            (leaf,) = (
+                entry
+                for entry in native_entries["entries"]
+                if entry["id"] == native_entries["leafId"]
+            )
+            assert leaf["type"] == "message" and leaf["message"]["role"] == "assistant"
+            assert _message_text(leaf["message"]) == _UNMANAGED_PI_REPLY
+            assert probe.session.read_bytes() == changed
+        else:
+            transcript.write_bytes(changed)
         changed_file = transcript.stat()
 
         refused = journey.invoke(f"run:{seed_id}", _TASKS[1])
@@ -1936,7 +2023,13 @@ def test_managed_pi_refuses_changed_session_bytes_before_native_open(
         assert evidence["settlement"]["reason"] == "FAILED_TO_START"
         assert all(
             value not in refused.stdout + refused.stderr
-            for value in (str(transcript), _PRIVATE_TOOL_OUTPUT, _SECRET, *_TASKS)
+            for value in (
+                str(transcript),
+                _PRIVATE_TOOL_OUTPUT,
+                _UNMANAGED_PI_REPLY,
+                _SECRET,
+                *_TASKS,
+            )
         )
 
         attempted = journal.run_events(response["fleet_run_id"])
@@ -1945,7 +2038,7 @@ def test_managed_pi_refuses_changed_session_bytes_before_native_open(
         )
         assert reservation.storage_id == original_writer.storage_id
         assert not any(
-            type(event) is ProcessStartedEvent
+            isinstance(event, ProcessStartingEvent)
             and event.sequence > reservation.sequence
             and event.step_id == reservation.step_id
             for event in attempted.events
@@ -1968,6 +2061,158 @@ def test_managed_pi_refuses_changed_session_bytes_before_native_open(
             seed.events,
             seed.pi_session,
         )
+
+
+@pytest.mark.certification
+def test_installed_pi_unmanaged_edit_during_original_continuation_refuses_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(
+        tmp_path, monkeypatch, hold_request_number=3, reply_after_hold=True
+    ) as journey:
+        initial = journey.invoke("new", _TASKS[0])
+        assert initial.returncode == 0, (initial.stdout[-3000:], initial.stderr[-3000:])
+        seed_id = json.loads(initial.stdout)["fleet_run_id"]
+        reader = LocalDatabase(journey.database_path, read_only=True)
+        journal = Journal(reader)
+        seed = journal.run_events(seed_id)
+        assert seed.pi_session is not None and seed.pi_session.save_verification == "pi_rpc_synced"
+        assert journal.inspect_pi_session(seed_id).availability == "available"
+        (seed_writer,) = (
+            event for event in seed.events if isinstance(event, PiSessionWriterReservedEvent)
+        )
+        session_root = ApplicationStatePathLayout.from_database(journey.database_path).pi_sessions
+        transcript = session_root / seed_writer.storage_id / PI_SESSION_NEW_FILE.name
+        with transcript.open("rb") as stream:
+            seed_bytes = stream.read(128 * 1024)
+        assert 0 < len(seed_bytes) < 128 * 1024 and seed_bytes.endswith(b"\n")
+
+        selected, backend, git = resolve_native_cli_selection(
+            agent="pi",
+            profile="pi-rpc",
+            workspace=journey.repository,
+            config_file=journey.config,
+            session=PiSessionIntent(mode="continue", prior_run_id=seed_id),
+        )
+        runtime = ApplicationRuntime.build(
+            standard_local=True,
+            standard_process_isolation=backend,
+            git_service=git,
+            startup_purpose="workflow",
+        )
+        coordinator = ExecutionCoordinator(reader)
+        try:
+            run = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=journey.repository,
+                skill=journey.skill,
+                task=_TASKS[1],
+                verification=(("/usr/bin/true",),),
+            )
+            run_id = run.fleet_run_id
+            assert journey.held_inference_arrived.wait(65), journey.errors
+            live = journal.run_events(run_id)
+            assert live.run.status is FleetRunStatus.RUNNING
+            lease = coordinator.active_lease()
+            assert lease is not None and lease.fleet_run_id == run_id and lease.custody is not None
+            assert lease.custody.phase == "WORKER_OWNED" and lease.custody.owner_pid != os.getpid()
+            (reservation,) = (
+                event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert reservation.storage_id == seed_writer.storage_id
+            assert reservation.continuation is not None
+            assert reservation.continuation.prior_run_id == seed_id
+            (started,) = (
+                event
+                for event in live.events
+                if type(event) is ProcessStartedEvent
+                and event.step_id == reservation.step_id
+                and event.sequence > reservation.sequence
+            )
+            assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in live.events)
+            assert journal.inspect_pi_session(seed_id).availability == "busy"
+
+            with transcript.open("rb") as stream:
+                live_bytes = stream.read(128 * 1024)
+            assert len(seed_bytes) < len(live_bytes) < 128 * 1024
+            assert live_bytes.startswith(seed_bytes)
+            assert _TASKS[1].encode() in live_bytes[len(seed_bytes) :]
+            altered = _change_pi_reply_in_place(transcript, live_bytes)
+            assert altered[len(seed_bytes) :] == live_bytes[len(seed_bytes) :]
+            assert hashlib.sha256(altered[: len(seed_bytes)]).digest() != (
+                hashlib.sha256(seed_bytes).digest()
+            )
+            assert coordinator.active_lease() == lease and journal.run_events(run_id) == live
+            journey.release_held_inference.set()
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=40)
+        finally:
+            journey.release_held_inference.set()
+            runtime.shutdown(wait_for_runs=False, cancel_grace_seconds=2)
+
+        assert detail.outcome is FleetRunOutcome.SUCCESS
+        native, verifier = detail.game_tape.repositories[0].steps
+        assert native.settlement.outcome == "SUCCESS" and native.settlement.cleanup == "VERIFIED"
+        assert any(observation.settled for observation in native.native_agent_observations)
+        assert verifier.settlement.outcome == "SUCCESS"
+        with transcript.open("rb") as stream:
+            retained = stream.read(128 * 1024)
+        assert len(altered) < len(retained) < 128 * 1024 and retained.startswith(altered)
+        (assistant,) = (
+            entry["message"]
+            for entry in map(json.loads, retained[len(altered) :].splitlines())
+            if entry["type"] == "message"
+        )
+        assert assistant["role"] == "assistant" and _message_text(assistant) == _MODEL_REPLY
+
+        finished = journal.run_events(run_id)
+        assert finished.events[: len(live.events)] == live.events
+        exited, quiescent = (
+            event
+            for event in finished.events
+            if isinstance(event, (ProcessExitedEvent, DescendantsQuiescentEvent))
+            and event.physical_execution_id == started.physical_execution_id
+        )
+        assert isinstance(exited, ProcessExitedEvent) and exited.returncode == 0
+        assert isinstance(quiescent, DescendantsQuiescentEvent)
+        (receipt,) = (
+            event for event in finished.events if isinstance(event, PiSessionWriterObservedEvent)
+        )
+        assert receipt.reservation_sequence == reservation.sequence
+        assert exited.sequence < receipt.quiescent_sequence == quiescent.sequence < receipt.sequence
+        assert receipt.observation.persistence == "unknown" and receipt.observation.file is None
+        assert coordinator.active_lease() is None
+        assert journal.inspect_pi_session(run_id).availability == "unverified"
+
+        fresh = journey.runs("events", run_id, "--after", "0", "--limit", "100", "--json")
+        assert fresh.returncode == 0, fresh.stderr
+        public = json.loads(fresh.stdout)["pi_session"]
+        assert public["persistence"] == "unknown" and public["native"] is None
+        assert public["settlement"] == native.settlement.model_dump(mode="json")
+        assert public["following_steps"] == [
+            {"step_id": verifier.step_id, "settlement": verifier.settlement.model_dump(mode="json")}
+        ]
+        revision = journal.read_view().revision
+        refused = journey.invoke(f"run:{run_id}", _TASKS[2])
+        assert refused.returncode == 2, (refused.stdout[-3000:], refused.stderr[-3000:])
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        visible = fresh.stdout + fresh.stderr + refused.stdout + refused.stderr
+        assert all(
+            value not in visible
+            for value in (str(transcript), _UNMANAGED_PI_REPLY, _PRIVATE_TOOL_OUTPUT, _SECRET)
+        )
+        prior = journal.run_events(seed_id)
+        assert (prior.run, prior.events, prior.pi_session) == (
+            seed.run,
+            seed.events,
+            seed.pi_session,
+        )
+        assert journal.inspect_pi_session(seed_id).availability == "unavailable"
+        assert journal.run_events(run_id) == finished
+        assert journal.read_view().revision == revision
+        assert transcript.read_bytes() == retained and tuple(session_root.iterdir()) == (
+            transcript.parent,
+        )
+        assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]] and not journey.errors
 
 
 @pytest.mark.certification

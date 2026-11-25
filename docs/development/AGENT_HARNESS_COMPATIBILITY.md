@@ -1143,6 +1143,35 @@ controlled Linux Bubblewrap workload. The installed proof uses the managed Pi
 1.3.0 profile. Custom persistent extensions and other host environments remain
 outside this qualification.
 
+### Unmanaged Pi session writers — HUG-135
+
+**Disposition**. Retain the original Journal writer reservation and the
+descriptor-bound storage checks. The reservation fences admitted Oh-Goon
+writers. A same-user process outside the Run can still write the native file.
+Oh-Goon checks mount topology visible to the worker and requires one owned
+regular file at the selected path.
+
+Before launching a continuation, Oh-Goon verifies the retained file identity
+and exact byte receipt. Pi confirms the native session and active leaf before
+the prompt. A valid edit can keep both native identifiers and the same inode
+while changing model-visible history. The byte check refuses those changed
+bytes before native launch.
+
+After the continuing process exits and its descendants settle, Oh-Goon
+verifies the retained predecessor prefix and the entries Pi reports appending.
+A changed prefix leaves persistence unknown. The original Run and the
+continuing Run keep their own Agent and verifier results. The lineage cannot
+reopen from that unqualified save. These checks cover the bytes at the named
+checkpoints. Continuous exclusion, attribution to a specific process, and
+transient changes restored between checks remain unqualified.
+
+The [installed Pi journeys](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+use a separate same-user process to change a saved message before launch and
+during a claimed continuation. The [storage cases](../../backend/tests/unit/runtime/test_pi_session_storage.py)
+cover in-place edits, symlink and hardlink aliases, and the worker's bind-mount
+topology checks. The [Journal cases](../../backend/tests/unit/runtime/test_pi_session_writer.py)
+retain the stale-callback and managed-writer fences.
+
 ### Exact read-only Pi reopen — HUG-43
 
 **Disposition: retain** the Pi 1.3.0 RPC relay, managed inference bootstrap,
