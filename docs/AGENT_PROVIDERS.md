@@ -162,9 +162,11 @@ oh-goon ai --agent pi --profile pi-rpc --session new --prompt-file task.txt
 The claimed Step reserves the writer in the original Journal before giving Pi
 its private directory. Read the reservation and any session-file observation
 with `oh-goon runs events RUN_ID --after 0 --json`. A reservation alone leaves
-the write unconfirmed. A qualified save matches Pi's final entries to the
-pinned file and synchronizes the file and its directory after the original
-process settles. A missing or incomplete save reports unknown persistence.
+the write unconfirmed. Pi can report a session ID and exit before a
+conversation creates any file. The first user message can be saved even
+when the first model turn fails. A qualified save matches Pi's final entries
+to the pinned file and synchronizes the file and its directory after the
+original process settles. A missing or incomplete save reports unknown persistence.
 The Run keeps its own outcome and verification results. New-session Runs require a fresh task, with the built-in managed
 configuration and a serial runtime. Candidate workspaces, repair campaigns,
 Step resource caps, custom native arguments and configuration, and Run replay

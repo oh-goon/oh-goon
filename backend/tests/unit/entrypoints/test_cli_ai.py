@@ -774,6 +774,16 @@ def test_ai_prompt_file_is_bounded_before_application_state(native_cli: SimpleNa
     native_cli.build.assert_not_called()
 
 
+def test_empty_pi_prompt_refuses_before_application_state(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main([*native_cli.argv[:-1], "", "--session", "new", "--json"]) == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["code"] == "AGENT_PROVIDER_ERROR"
+    native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+
+
 @pytest.mark.parametrize("source", ["argument", "file"])
 def test_native_task_character_limit_precedes_application_mutation(
     native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], source: str
