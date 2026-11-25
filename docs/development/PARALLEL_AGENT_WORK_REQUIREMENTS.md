@@ -261,8 +261,8 @@ Pausing prevents new admissions. Existing Runs settle through their original
 owners. The operator selects the branch, commit and reviewed Skill for a fresh
 writable candidate through the [named-branch handoff](../AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
 
-The next boundaries for unattended collaboration are ordered by the evidence
-they need:
+Advance unattended collaboration in this order and verify each boundary on the
+selected environment.
 
 | Boundary | Required behavior and proof |
 | --- | --- |

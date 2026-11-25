@@ -11,15 +11,15 @@ import sys
 import tempfile
 import time
 from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Any
 
-import httpx2
 import pytest
 
 from oh_goon.api.local_access import LOCAL_ACCESS_HEADER
@@ -233,6 +233,39 @@ def _cli_json(cli: Path, env: Mapping[str, str], cwd: Path, *arguments: str) -> 
     return payload
 
 
+@dataclass(frozen=True)
+class _LoopbackResponse:
+    path: str
+    status: int
+    body: bytes
+
+
+@dataclass(frozen=True)
+class _LoopbackClient:
+    port: int
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        authenticated: bool = True,
+    ) -> _LoopbackResponse:
+        assert path.startswith("/") and not path.startswith("//")
+        headers = {LOCAL_ACCESS_HEADER: _ACCESS} if authenticated else {}
+        body = None
+        if json_body is not None:
+            body = json.dumps(json_body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        with closing(HTTPConnection("127.0.0.1", self.port, timeout=4)) as connection:
+            connection.request(method, path, body=body, headers=headers)
+            with connection.getresponse() as response:
+                data = response.read(1024 * 1024 + 1)
+                assert len(data) <= 1024 * 1024
+                return _LoopbackResponse(path, response.status, data)
+
+
 @contextmanager
 def _application_server(
     cli: Path,
@@ -241,7 +274,7 @@ def _application_server(
     catalog: Path,
     env: Mapping[str, str],
     label: str,
-) -> Generator[httpx2.Client, None, None]:
+) -> Generator[_LoopbackClient, None, None]:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -273,28 +306,21 @@ def _application_server(
         ) as process,
     ):
         try:
-            with httpx2.Client(
-                base_url=f"http://127.0.0.1:{port}",
-                headers={LOCAL_ACCESS_HEADER: _ACCESS},
-                timeout=4,
-                trust_env=False,
-            ) as client:
-                deadline = time.monotonic() + 30
-                while time.monotonic() < deadline and process.poll() is None:
-                    try:
-                        if client.get("/healthz").status_code == 204:
-                            break
-                    except httpx2.TransportError:
-                        pass
-                    time.sleep(0.2)
-                else:
-                    with log.open("rb") as diagnostic:
-                        diagnostic.seek(max(0, log.stat().st_size - 4096))
-                        tail = (
-                            diagnostic.read().decode(errors="replace").replace(_ACCESS, "[access]")
-                        )
-                    pytest.fail(f"Public application did not reach readiness: {tail}")
-                yield client
+            client = _LoopbackClient(port)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline and process.poll() is None:
+                try:
+                    if client.request("GET", "/healthz", authenticated=False).status == 204:
+                        break
+                except (OSError, HTTPException):
+                    pass
+                time.sleep(0.2)
+            else:
+                with log.open("rb") as diagnostic:
+                    diagnostic.seek(max(0, log.stat().st_size - 4096))
+                    tail = diagnostic.read().decode(errors="replace").replace(_ACCESS, "[access]")
+                pytest.fail(f"Public application did not reach readiness: {tail}")
+            yield client
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -307,23 +333,23 @@ def _application_server(
             assert process.returncode in (0, -15), process.returncode
 
 
-def _payload(response: httpx2.Response, status: int = 200) -> dict[str, Any]:
-    assert _MODEL_KEY not in response.text and _ACCESS not in response.text
-    assert response.status_code == status, (response.url, response.status_code, response.text)
-    payload = response.json()
+def _payload(response: _LoopbackResponse, status: int = 200) -> dict[str, Any]:
+    assert _MODEL_KEY.encode() not in response.body and _ACCESS.encode() not in response.body
+    assert response.status == status, (response.path, response.status, response.body[:4096])
+    payload = json.loads(response.body)
     assert isinstance(payload, dict)
     return payload
 
 
-def _schedule(client: httpx2.Client) -> dict[str, Any]:
-    (schedule,) = _payload(client.get("/api/schedules"))["schedules"]
+def _schedule(client: _LoopbackClient) -> dict[str, Any]:
+    (schedule,) = _payload(client.request("GET", "/api/schedules"))["schedules"]
     assert isinstance(schedule, dict)
     assert schedule["definition"]["schedule_id"] == _SCHEDULE_ID
     return schedule
 
 
 def _await_occurrence(
-    client: httpx2.Client, *, prior_id: str | None, due: datetime
+    client: _LoopbackClient, *, prior_id: str | None, due: datetime
 ) -> dict[str, Any]:
     deadline = time.monotonic() + max(0.0, (due - datetime.now(due.tzinfo)).total_seconds()) + 45
     current = None
@@ -342,7 +368,7 @@ def _await_occurrence(
 
 
 def _scheduled_run(
-    client: httpx2.Client,
+    client: _LoopbackClient,
     occurrence: dict[str, Any],
     expected_target: dict[str, Any],
     *,
@@ -352,10 +378,10 @@ def _scheduled_run(
 ) -> tuple[str, set[str]]:
     schedule_run_id = occurrence["schedule_run_id"]
     path = f"/api/schedules/{_SCHEDULE_ID}/occurrences/{schedule_run_id}/repositories"
-    (repository,) = _payload(client.get(path))["items"]
+    (repository,) = _payload(client.request("GET", path))["items"]
     assert repository["status"] == "SUCCESSFUL"
     run_id = repository["fleet_run_id"]
-    run = _payload(client.get(f"/api/fleet/runs/{run_id}"))
+    run = _payload(client.request("GET", f"/api/fleet/runs/{run_id}"))
     assert run["outcome"] == "SUCCESS" and run["run"]["source"] == "SCHEDULED"
     assert run["run"]["target"] == expected_target
     (tape,) = run["game_tape"]["repositories"]
@@ -365,7 +391,7 @@ def _scheduled_run(
     assert claim["settled"] and not claim["failed"] and claim["role"] == "review"
     handoff = _cli_json(cli, env, root, "runs", "handoff", run_id)
     assert handoff["outcome"] == "SUCCESS" and handoff["fleet_run_id"] == run_id
-    events = _payload(client.get(f"/api/fleet/runs/{run_id}/events"))["events"]
+    events = _payload(client.request("GET", f"/api/fleet/runs/{run_id}/events"))["events"]
     assert sum(event["event_type"] == "RUN_ADMITTED" for event in events) == 1
     executions = {
         event["physical_execution_id"]
@@ -494,15 +520,10 @@ def test_installed_review_schedule_runs_twice_after_public_application_reopen(
         with _application_server(cli, tmp_path, repository, catalog, env, "initial") as client:
             path = f"/api/schedules/{_SCHEDULE_ID}/from-review-run"
             arguments = {"fleet_run_id": seed_id, "name": "Retained review", "interval_minutes": 1}
-            unauthenticated = httpx2.post(
-                client.base_url.join(path),
-                json=arguments,
-                timeout=4,
-                trust_env=False,
-            )
-            assert unauthenticated.status_code == 401
-            assert _payload(client.get("/api/schedules"))["schedules"] == []
-            definition = _payload(client.post(path, json=arguments), 201)
+            unauthenticated = client.request("POST", path, json_body=arguments, authenticated=False)
+            assert unauthenticated.status == 401
+            assert _payload(client.request("GET", "/api/schedules"))["schedules"] == []
+            definition = _payload(client.request("POST", path, json_body=arguments), 201)
             assert definition["target"]["retained_review_run_id"] == seed_id
             assert definition["target"]["plan"] == seed["run"]["target"]["plan"]
             assert (
@@ -566,7 +587,11 @@ def test_installed_review_schedule_runs_twice_after_public_application_reopen(
                 )
             }
             paused = _payload(
-                client.put(f"/api/schedules/{_SCHEDULE_ID}", json={**replace, "state": "paused"})
+                client.request(
+                    "PUT",
+                    f"/api/schedules/{_SCHEDULE_ID}",
+                    json_body={**replace, "state": "paused"},
+                )
             )
             assert paused["state"] == "paused"
             status = _schedule(client)

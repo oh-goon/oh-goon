@@ -72,8 +72,8 @@ Existing installed evidence retains its original environment and mode scope.
 | Codex 0.164.0, [managed review][codex-managed-tests] | **PASS**, three local-fixture entrypoints: original native Run, initialized catalog Plan and initialized catalog Goon, preserving the selected source/tool boundary and complete typed review. No live-account or model-quality qualification. |
 
 The recurring native review uses the public Pi 1.3.0 release entrypoint on Linux
-with Bubblewrap 0.11.1 and a controlled Chat Completions endpoint. Disposition:
-**retain** the ephemeral `--no-session` selection, managed broker disclosure,
+with Bubblewrap 0.11.1 and a controlled Chat Completions endpoint. **Retain**
+the ephemeral `--no-session` selection, managed broker disclosure,
 typed review parsing and original Step settlement. The public CLI and API proof
 uses two wall-clock occurrences across an app restart. Each reopens the exact
 approved source and captured Skill in a separate Run and Step process. Peer notes

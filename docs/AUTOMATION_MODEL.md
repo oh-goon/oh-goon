@@ -141,7 +141,7 @@ Recurrence is for the exact approved source and captured Skill. A changed source
 new task or new documents require a fresh seed and explicit Schedule selection.
 Keep model credentials under the runtime's existing provider authority. The
 Schedule reuses the retained selector and original recipient. The ordinary
-`plan schedule` path remains for authored Plans with schedule-supported inputs.
+`plan schedule` command accepts authored Plans with schedule-supported inputs.
 See [sharing reviewed context and working on separate branches](AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
 
 ## Schedule definitions are not workflow programs
