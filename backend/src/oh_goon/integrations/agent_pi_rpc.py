@@ -442,6 +442,11 @@ class PiRpcControl:
             disposition = data.get("disposition")
             if type(disposition) is not str or disposition not in {"started", "queued"}:
                 self._fail("Pi RPC did not accept a qualified native agent turn")
+            if self._persistent and disposition == "queued":
+                self._fail(
+                    "Persistent Pi RPC queued the admitted turn",
+                    refusal=PiSessionRefusalCode.SETTLEMENT_UNCERTAIN,
+                )
             self._prompt_accepted = True
             self._request_final_if_settled()
         elif request_id == "oh-goon:final-state":

@@ -1265,6 +1265,26 @@ separately for the selected ephemeral profile. Persistent optional tools
 remain outside this configuration, and real-account identity and historical
 disclosure are separately tracked in HUG-109 and HUG-131.
 
+### Managed Pi session control during a Step — HUG-136
+
+**Disposition**. Retain the fixed session selection, managed Pi RPC relay,
+and original Step process owner. Treat native session mutation commands and
+interactive extensions as unqualified in persistent mode. Pi 1.3.0 exposes
+session creation, switch, fork, and clone as separate RPC commands. The relay
+owns child input and supplies only startup observations, one frozen prompt,
+and settlement observations. It sends no streaming behavior and requires a
+started prompt acknowledgement. A queued acknowledgement refuses settlement.
+Physical cancellation closes the original command under the same Run owner.
+
+The [installed configuration journey][pi-native-config-tests] checks that
+fresh and continuing Runs keep the exact managed slot with a conflicting
+project session-directory setting. It exercises native discovery controls
+and verifies that the continued Run preserves its session ID and advances
+its leaf. The scope is Pi 1.3.0, managed RPC, Bubblewrap on Linux, and
+synthetic inference. Startup and settlement observations establish identity
+at those checkpoints. Continuous identity attestation and session mutations
+within a Step remain unqualified.
+
 ### Pi history disclosure after exact reopen — HUG-131
 
 **Disposition**. Retain native Pi's conversation construction, the original

@@ -128,7 +128,10 @@ def _final_identity(control: PiRpcControl) -> None:
 
 def _persistent_start() -> PiRpcControl:
     control = PiRpcControl(b"prompt", persistent=True)
-    _commands(control)
+    assert _commands(control) == [
+        {"id": "oh-goon:state", "type": "get_state"},
+        {"id": "oh-goon:entries", "type": "get_entries"},
+    ]
     assert (
         control.feed_stdout(
             _response(
@@ -168,6 +171,9 @@ def test_persistent_rpc_observes_same_file_and_final_leaf_without_retaining_entr
     [prompt] = _commands(control)
     assert prompt["id"] == "oh-goon:prompt"
     _ack(control)
+    started = _line({"type": "agent_start"})
+    assert control.feed_stdout(started) == (started,)
+    assert control.read_input(1024) is None
     terminal = _line({"type": "agent_settled", "aborted": True})
     assert control.feed_stdout(terminal) == (terminal,)
     assert _commands(control) == [
@@ -782,6 +788,31 @@ def _reopen_control() -> PiRpcControl:
             base_url="http://127.0.0.1:18743/v1",
         ),
     )
+
+
+@pytest.mark.parametrize("continuing", [False, True], ids=["new", "continue"])
+def test_persistent_rpc_refuses_queued_turn(continuing: bool) -> None:
+    if continuing:
+        control = _reopen_control()
+        _commands(control)
+        control.feed_stdout(_response("oh-goon:state", "get_state", _reopen_state()))
+    else:
+        control = _persistent_start()
+    control.feed_stdout(
+        _response(
+            "oh-goon:entries",
+            "get_entries",
+            {"entries": [], "leafId": "prior-leaf" if continuing else None},
+        )
+    )
+    [prompt] = _commands(control)
+    assert prompt["type"] == "prompt" and "streamingBehavior" not in prompt
+    with pytest.raises(AgentProviderError, match="queued the admitted turn"):
+        _ack(control, "queued")
+    assert control.read_input(1024) == b""
+    assert control.refusal_code is PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+    with pytest.raises(AgentProviderError, match="queued the admitted turn"):
+        control.finish()
 
 
 @pytest.mark.parametrize(

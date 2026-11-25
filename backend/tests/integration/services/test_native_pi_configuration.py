@@ -21,6 +21,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import PiSessionIntent
+from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.run_events import (
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
@@ -28,6 +29,7 @@ from oh_goon.core.models.run_events import (
     ProcessStartedEvent,
     StepAttemptCreatedEvent,
 )
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.vocabulary import FleetRunOutcome
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
@@ -563,6 +565,11 @@ def test_installed_pi_continuation_enforces_current_native_policy(
     mcp_marker = "/tmp/oh-goon-pi-project-mcp-started"
     project_native = repository / ".pi"
     project_native.mkdir()
+    project_session_dir = repository / "project-sessions"
+    project_session_dir.mkdir()
+    (project_native / "settings.json").write_text(
+        json.dumps({"sessionDir": str(project_session_dir)})
+    )
     private_store = Path(os.environ["HOME"]) / ".pi" / "agent"
     private_store.mkdir(parents=True)
     private_canary = "SYNTHETIC_PI_PERSONAL_STORE"
@@ -702,8 +709,24 @@ def test_installed_pi_continuation_enforces_current_native_policy(
             assert prior_isolation is not None and not prior_isolation.workspace_read_only
             prior_session = prior.game_tape.pi_session
             assert prior_session is not None and prior_session.native is not None
+            assert prior_session.save_verification == "pi_rpc_synced"
         finally:
             prior_runtime.shutdown(wait_for_runs=True)
+
+        database_path = Path(os.environ["OH_GOON_DB"])
+        database = LocalDatabase(database_path, read_only=True)
+        journal = Journal(database)
+        prior_events = journal.run_events(prior_id).events
+        (prior_reservation,) = (
+            event for event in prior_events if isinstance(event, PiSessionWriterReservedEvent)
+        )
+        session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
+        session_slot = session_root / prior_reservation.storage_id
+        session_file = session_slot / PI_SESSION_NEW_FILE.name
+        prior_file_stat = session_file.stat()
+        assert tuple(session_root.iterdir()) == (session_slot,)
+        assert tuple(session_slot.iterdir()) == (session_file,)
+        assert not tuple(project_session_dir.iterdir())
 
         discovered_extension = project_native / "extensions" / "fixture.mjs"
         discovered_extension.parent.mkdir(parents=True)
@@ -741,9 +764,6 @@ def test_installed_pi_continuation_enforces_current_native_policy(
         selected_session = PiSessionIntent(mode="continue", prior_run_id=prior_id)
         public_native = tmp_path / "other-public-config"
         public_native.mkdir()
-        database = LocalDatabase(Path(os.environ["OH_GOON_DB"]), read_only=True)
-        journal = Journal(database)
-        prior_events = journal.run_events(prior_id).events
         revision = database.durable_revision()
         private_text = (private_canary, history_canary, _BROKER_KEY, rotated_key)
 
@@ -864,8 +884,24 @@ def test_installed_pi_continuation_enforces_current_native_policy(
             evidence = detail.game_tape.pi_session
             assert evidence is not None and evidence.prior_run_id == prior_id
             assert evidence.persistence == "observed" and evidence.native is not None
+            assert evidence.save_verification == "pi_rpc_synced"
             assert evidence.native.session_id == prior_session.native.session_id
             assert evidence.native.leaf_id != prior_session.native.leaf_id
+            (continued_reservation,) = (
+                event
+                for event in journal.run_events(admitted.fleet_run_id).events
+                if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert continued_reservation.storage_id == prior_reservation.storage_id
+            continued_file_stat = session_file.stat()
+            assert (continued_file_stat.st_dev, continued_file_stat.st_ino) == (
+                prior_file_stat.st_dev,
+                prior_file_stat.st_ino,
+            )
+            assert continued_file_stat.st_size > prior_file_stat.st_size
+            assert tuple(session_root.iterdir()) == (session_slot,)
+            assert tuple(session_slot.iterdir()) == (session_file,)
+            assert not tuple(project_session_dir.iterdir())
             agent, verifier = detail.game_tape.repositories[0].steps
             assert agent.settlement.outcome == verifier.settlement.outcome == "SUCCESS"
             assert agent.settlement.cleanup == verifier.settlement.cleanup == "VERIFIED"
