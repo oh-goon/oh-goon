@@ -1,9 +1,12 @@
-name: Daily and release verification
-run-name: ${{ inputs.mode == 'release' && 'release-full' || 'daily-full' }} | ${{ inputs.slot || 'scheduled' }} | ${{ inputs.ref || github.sha }}
+name: Scheduled and release verification
+run-name: >-
+  ${{ inputs.mode == 'release' && 'release-full' || 'daily-full' }} |
+  ${{ inputs.slot || (inputs.mode == 'release' && 'scheduled' || 'latest-slot') }} |
+  ${{ inputs.ref || github.sha }}
 
 "on":
   schedule:
-    - cron: '23 2 * * *'
+    - cron: '23 2 * * 0,2,5'
   workflow_dispatch:
     inputs:
       mode:
@@ -13,7 +16,7 @@ run-name: ${{ inputs.mode == 'release' && 'release-full' || 'daily-full' }} | ${
         default: daily
         required: true
       slot:
-        description: UTC daily slot YYYY-MM-DD; blank uses the most recent 02:23 UTC slot
+        description: UTC slot date (YYYY-MM-DD). In daily mode, a blank slot selects the most recent scheduled slot.
         type: string
         default: ''
       ref:
@@ -45,6 +48,9 @@ jobs:
     env:
       UV_PYTHON: '3.12'
       GH_TOKEN: ${{ github.token }}
+      CAMPAIGN_MODE: ${{ inputs.mode || 'daily' }}
+      CAMPAIGN_METADATA_ROOT: >-
+        ${{ inputs.mode == 'daily' && inputs.ref != '' && inputs.ref != github.sha && 'campaign-control' || 'campaign-source' }}
     steps:
       - name: Validate explicit campaign inputs before checkout
         env:
@@ -63,44 +69,57 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
+          path: campaign-source
           fetch-depth: 0
           persist-credentials: false
       - name: Bind selected source before materialization
         id: source
+        working-directory: campaign-source
         env:
-          CAMPAIGN_MODE: ${{ inputs.mode || 'daily' }}
-          CAMPAIGN_REF: ${{ inputs.ref }}
+          REQUESTED_SOURCE_SHA: ${{ inputs.ref || github.sha }}
         run: |
           set -euo pipefail
           source_sha=$(git rev-parse HEAD)
-          if [ -n "$CAMPAIGN_REF" ]; then test "$CAMPAIGN_REF" = "$source_sha"; fi
+          test "$source_sha" = "$REQUESTED_SOURCE_SHA"
           if [ "$CAMPAIGN_MODE" = daily ]; then git merge-base --is-ancestor "$source_sha" origin/main; fi
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.CAMPAIGN_METADATA_ROOT == 'campaign-control'
+        with:
+          ref: ${{ github.sha }}
+          path: campaign-control
+          persist-credentials: false
+      - name: Bind the catch-up controller before materialization
+        if: env.CAMPAIGN_METADATA_ROOT == 'campaign-control'
+        working-directory: campaign-control
+        run: 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: '0.12.5'
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          cache-dependency-glob: ${{ env.CAMPAIGN_METADATA_ROOT }}/backend/uv.lock
       - name: Prepare the original metadata owner
-        run: uv sync --project backend --frozen --no-default-groups
+        run: uv sync --project "$CAMPAIGN_METADATA_ROOT/backend" --frozen --no-default-groups
       - name: Freeze source and admit one slot
         id: admit
         env:
-          CAMPAIGN_MODE: ${{ inputs.mode || 'daily' }}
           CAMPAIGN_SLOT: ${{ inputs.slot }}
-          CAMPAIGN_REF: ${{ inputs.ref }}
           FROZEN_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$FROZEN_SOURCE_SHA"
+          test "$(git -C campaign-source rev-parse HEAD)" = "$FROZEN_SOURCE_SHA"
+          if [ "$CAMPAIGN_METADATA_ROOT" = campaign-control ]; then
+            test "$(git -C "$CAMPAIGN_METADATA_ROOT" rev-parse HEAD)" = "$GITHUB_SHA"
+          fi
           mkdir -m 700 "$RUNNER_TEMP/full-admission"
-          uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression prepare \
+          uv run --offline --frozen --no-sync --project "$CAMPAIGN_METADATA_ROOT/backend" oh-goon-daily-regression prepare \
             --repository "$GITHUB_REPOSITORY" --mode "$CAMPAIGN_MODE" --slot "$CAMPAIGN_SLOT" \
             --sha "$FROZEN_SOURCE_SHA" --run-id "$GITHUB_RUN_ID" \
             --output "$RUNNER_TEMP/full-admission/campaign.json"
       - name: Consume the canonical complete Make plan
         id: plan
         if: steps.admit.outputs.run == 'true'
+        working-directory: campaign-source
         run: printf 'targets=%s\n' "$(make --no-print-directory -s release-check-plan)" >> "$GITHUB_OUTPUT"
       - name: Explain coalesced slot
         if: steps.admit.outputs.run == 'false'
@@ -137,7 +156,7 @@ jobs:
       BACKEND_CHECK_TEST_WORKERS: '2'
       INTEGRATION_TEST_WORKERS: '2'
       INSTALL_FRONTEND: >-
-        ${{ contains(fromJSON('["frontend-check","check-generated","check-tooling-tests","release-locks-check","test-cross-owner-integration"]'), matrix.target) }}
+        ${{ contains(fromJSON('["frontend-check","check-tooling-tests","test-cross-owner-integration"]'), matrix.target) }}
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
       OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
       OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
@@ -151,7 +170,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: env.INSTALL_FRONTEND == 'true' || matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration'
+        if: env.INSTALL_FRONTEND == 'true' || matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'release-locks-check'
         with:
           node-version: '24.19.0'
           cache: ${{ env.INSTALL_FRONTEND == 'true' && 'npm' || '' }}

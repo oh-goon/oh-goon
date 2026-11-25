@@ -298,6 +298,14 @@ def test_saved_shared_schedule_ticks_frozen_source_once_per_selected_target_afte
     try:
         assert cold.schedules.definition(saved.schedule_id) == saved
         assert cold.lineups.repository_ids("selected") == selected
+        before_due = saved.created_at + timedelta(seconds=59)
+        with monkeypatch.context() as clock:
+            clock.setattr("oh_goon.services.schedule_timing.utc_now", lambda: before_due)
+            cold.schedules.tick()
+            status = cold.schedules.catalog().schedules[0]
+            assert status.next_run_at == saved.created_at + timedelta(minutes=1)
+            assert status.latest_occurrence is None
+            assert not cold.runs.history().items
         cold.schedules.tick()
         occurrence = cold.schedules.catalog().schedules[0].latest_occurrence
         assert occurrence is not None and occurrence.expected == 2

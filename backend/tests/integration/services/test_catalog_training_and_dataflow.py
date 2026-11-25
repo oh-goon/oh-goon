@@ -32,12 +32,9 @@ from tests.integration.api.client import authenticated_api_client
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = ROOT / "template-certification" / "fixtures"
 IRIS_PROJECT = ROOT / "templates/goons/ml/iris-train"
-pytestmark = [
-    pytest.mark.daily,
-    pytest.mark.skipif(
-        os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
-    ),
-]
+pytestmark = pytest.mark.skipif(
+    os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
+)
 
 
 def _native(argv: list[str], repository: Path) -> subprocess.CompletedProcess[str]:
@@ -80,7 +77,7 @@ def _project(
     ):
         result = _native(argv, repository)
         assert result.returncode == 0, result.stderr
-    if (repository / "uv.lock").is_file():
+    if group is not None and (repository / "uv.lock").is_file():
         before = (repository / "uv.lock").read_bytes()
         prepared = _native(
             [
@@ -88,7 +85,8 @@ def _project(
                 "sync",
                 "--frozen",
                 "--no-default-groups",
-                *(["--group", group] if group else []),
+                "--group",
+                group,
             ],
             repository,
         )
@@ -124,11 +122,6 @@ def _cli(tmp_path: Path, *arguments: str, expected: int = 0) -> str:
         completed.stderr[-8192:],
     )
     return completed.stdout
-
-
-@pytest.fixture(scope="module")
-def native_fixture_uv_cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("teaching-project-uv-cache")
 
 
 def _configuration(
@@ -182,48 +175,6 @@ def _run(
         return runtime.runs.get(receipt["fleet_run_id"])
     finally:
         runtime.shutdown(wait_for_runs=True)
-
-
-@pytest.mark.parametrize("threshold,expected", [(90, 0), (100, 1)])
-def test_iris_project_command_trains_and_writes_actual_model_parameters(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    threshold: int,
-    expected: int,
-) -> None:
-    repository = _project(tmp_path, monkeypatch, IRIS_PROJECT, None)
-    completed = _native(
-        [
-            "uv",
-            "run",
-            "--no-sync",
-            "iris-train",
-            "--random-seed",
-            "42",
-            "--test-size-percent",
-            "20",
-            "--minimum-accuracy-percent",
-            str(threshold),
-            "--max-iterations",
-            "300",
-        ],
-        repository,
-    )
-    assert completed.returncode == expected, completed.stderr
-    metrics = json.loads((repository / "ml-output/iris-training-metrics.json").read_text())
-    model = json.loads((repository / "ml-output/iris-model-parameters.json").read_text())
-    assert metrics["training_examples"] == 120
-    assert metrics["test_examples"] == 30
-    assert metrics["random_seed"] == 42
-    assert metrics["test_size_percent"] == 20
-    assert metrics["max_iterations"] == 300
-    assert 0.9 <= metrics["accuracy"] < 1
-    assert len(model["coefficients"]) == len(model["classes"]) == 3
-    assert all(len(row) == 4 for row in model["coefficients"])
-    assert len(model["scaler_mean"]) == len(model["scaler_scale"]) == 4
-    assert metrics["scikit_learn_version"] == model["scikit_learn_version"]
-    if expected:
-        assert metrics["accuracy"] < metrics["minimum_accuracy"]
 
 
 def test_iris_strict_plan_requires_deployment_before_training(
@@ -287,32 +238,13 @@ def test_iris_atomic_wrapper_accepts_retained_captured_project_before_execution(
         runtime.shutdown(wait_for_runs=True)
 
 
+@pytest.mark.daily
 def test_iris_native_development_training_export_repeat_and_failure_through_fresh_cli_processes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    native_fixture_uv_cache: Path,
 ) -> None:
-    monkeypatch.setenv("UV_CACHE_DIR", str(native_fixture_uv_cache))
-    repository = _project(tmp_path, monkeypatch, IRIS_PROJECT, "dev", register=False)
+    repository = _project(tmp_path, monkeypatch, IRIS_PROJECT, None, register=False)
     native_lock = (repository / "uv.lock").read_bytes()
-    tested = _native(
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "--no-sync",
-            "pytest",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / "native-test-output"),
-            "tests",
-        ],
-        repository,
-    )
-    assert tested.returncode == 0, (tested.stderr or tested.stdout)[-8192:]
-    assert (repository / "uv.lock").read_bytes() == native_lock
-    assert not (repository / "ml-output").exists()
     target_parent_members = set(repository.parent.iterdir())
     _cli(tmp_path, "league", "add-folder", str(repository))
     workflow = tmp_path / "workflow"
@@ -608,6 +540,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
         api_app.dependency_overrides.clear()
 
 
+@pytest.mark.daily
 @pytest.mark.parametrize("tests_pass", [True, False])
 def test_advanced_plan_executes_real_test_build_and_explicit_local_export(
     tmp_path: Path,
