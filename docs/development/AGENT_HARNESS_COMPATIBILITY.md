@@ -88,6 +88,12 @@ checks the receiving source before the Agent starts and checks the candidate
 afterward. No native session or tool configuration crosses the handoff.
 [Installed writable round proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
 
+**Retain** those adaptations for a timed writable Schedule. The selected task
+enters the same branch publication and Fleet admission path as a writable
+round. The installed Pi test exercises two timed tasks against a controlled
+local provider and reopens state after interrupted publication and admission.
+[Writable Schedule restart proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
 ## Frozen context continuity — 2026-11-05
 
 [HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths

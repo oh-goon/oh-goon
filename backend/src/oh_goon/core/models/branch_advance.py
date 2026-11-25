@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Annotated
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.parallel_agent_work import BaseCommit
+from oh_goon.core.models.parallel_agent_work import BaseCommit, parallel_native_selection_id
 from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerification
 from oh_goon.core.product_identity import stable_id
 
@@ -29,6 +32,18 @@ def is_branch_round_run_id(fleet_run_id: str) -> bool:
         and re.fullmatch(r"[0-9a-f]{64}", fleet_run_id.removeprefix(BRANCH_ROUND_RUN_PREFIX))
         is not None
     )
+
+
+def writable_round_request_sha256(
+    *, selected: ResolvedNativeAgent, skill: Path | None, task: str
+) -> str:
+    payload = {
+        "native_selection_id": parallel_native_selection_id(selected),
+        "skill": str(skill) if skill is not None else None,
+        "task_sha256": hashlib.sha256(task.encode("utf-8")).hexdigest(),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 class PreparedBranchAdvance(ImmutableModel):

@@ -27,6 +27,7 @@ from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentProvidersConfig,
     PiSessionHostPreflightUnavailable,
+    PiSessionIntent,
     PiSessionUnavailable,
     ResolvedNativeAgent,
     require_pi_session_execution,
@@ -134,6 +135,7 @@ from oh_goon.services.schedules import ScheduleService
 
 class _BranchAdvanceAdmission(TypedDict, total=False):
     branch_advance_id: str
+    schedule_run_id: str
 
 
 def require_native_task(task: str) -> None:
@@ -354,6 +356,7 @@ class FleetPlanService:
         workspace: Path,
         skill: Path | None,
         task: str,
+        schedule_run_id: str | None = None,
     ) -> FleetRunState:
         from oh_goon.services.fleet_plan_writable_round import start_writable_round
 
@@ -364,7 +367,30 @@ class FleetPlanService:
             workspace=workspace,
             skill=skill,
             task=task,
+            schedule_run_id=schedule_run_id,
         )
+
+    def require_writable_round_runtime(
+        self, selected: ResolvedNativeAgent, workspace: Path
+    ) -> None:
+        """Check the configured serial native runtime before a scheduled Git effect."""
+        from oh_goon.integrations.fleet_plan_process_isolation import NativeProfileCommandRunner
+        from oh_goon.services.fleet_plan_candidate import require_native_candidate_selection
+
+        require_native_candidate_selection(selected)
+        if (
+            not self._standard_local_fleet
+            or self._workspace_database is None
+            or self._repositories is None
+            or self._run_concurrency is not None
+            or selected.session != PiSessionIntent(mode="ephemeral")
+            or self._native_git_service is None
+            or type(self._native_git_service.command_runner) is not NativeProfileCommandRunner
+        ):
+            raise FleetPlanInvalid(
+                "Scheduled writable rounds require the original serial Pi runtime"
+            )
+        self._prepare_native_agent(selected, workspace, read_only_workspace=True)
 
     def run_native_agent(
         self,
@@ -386,6 +412,7 @@ class FleetPlanService:
         expected_candidate_base_revision: str | None = None,
         expected_candidate_branch: str | None = None,
         branch_advance_id: str | None = None,
+        schedule_run_id: str | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -397,6 +424,10 @@ class FleetPlanService:
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
         require_native_task(task)
+        if schedule_run_id is not None and branch_advance_id is None:
+            raise FleetPlanInvalid(
+                "Scheduled writable Run requires its original branch advancement"
+            )
         branch_arguments: _BranchAdvanceAdmission = {}
         reserved_round_id = fleet_run_id is not None and is_branch_round_run_id(fleet_run_id)
         if branch_advance_id is not None or reserved_round_id:
@@ -434,8 +465,11 @@ class FleetPlanService:
                 workspace=workspace,
                 skill=skill,
                 task=task,
+                schedule_run_id=schedule_run_id,
             )
             branch_arguments["branch_advance_id"] = branch_advance_id
+            if schedule_run_id is not None:
+                branch_arguments["schedule_run_id"] = schedule_run_id
             verification = (verifier.argv,)
             expected_candidate_base_revision = prepared.commit
             expected_repository_instance_ids = {
@@ -533,12 +567,15 @@ class FleetPlanService:
                     allow_candidate_metadata=self._run_concurrency is not None,
                 )
                 fleet_run_id = fleet_run_id or new_fleet_run_id()
+                candidate_git = (
+                    self._native_git_service if schedule_run_id is not None else self._git_service
+                )
                 candidate_admission = prepare_candidate_workspace(
                     database=self._workspace_database,
                     repositories=self._repositories,
                     fleet_run_id=fleet_run_id,
                     repository_id=logical_repository_id,
-                    git=self._git_service,
+                    git=candidate_git,
                     expected_source=reviewed_repository_source,
                     expected_subject=(expected_repository_instance_ids or {}).get(
                         logical_repository_id
@@ -557,7 +594,7 @@ class FleetPlanService:
                 expected_repository_instance_ids = {
                     logical_repository_id: candidate_admission.source.subject_instance_id
                 }
-                capture_git = workspace_control_git(self._git_service)
+                capture_git = workspace_control_git(candidate_git)
             else:
                 selected = self._prepare_native_agent(
                     selected, workspace, read_only_workspace=read_only_agent and not verification
@@ -686,7 +723,9 @@ class FleetPlanService:
                     repository_ids={logical_repository_id},
                     all_repositories=False,
                     fleet_run_id=fleet_run_id,
-                    source=FleetRunSource.MANUAL,
+                    source=FleetRunSource.SCHEDULED
+                    if schedule_run_id is not None
+                    else FleetRunSource.MANUAL,
                     created_agent_deliveries=target.agent_deliveries,
                     expected_repository_instance_ids=expected_repository_instance_ids,
                     **branch_arguments,

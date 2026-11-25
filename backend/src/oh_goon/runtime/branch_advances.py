@@ -85,6 +85,10 @@ class BranchAdvanceStore:
     def find(self, advance_id: str) -> BranchAdvanceReceipt | None:
         return self._find("advance_id", advance_id)
 
+    @staticmethod
+    def find_in(connection: sqlite3.Connection, advance_id: str) -> BranchAdvanceReceipt | None:
+        return _read(connection, field="advance_id", identity=advance_id)
+
     def find_by_next_run(self, fleet_run_id: str) -> BranchAdvanceReceipt | None:
         return self._find("next_fleet_run_id", fleet_run_id)
 

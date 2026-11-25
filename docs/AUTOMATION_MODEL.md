@@ -144,6 +144,43 @@ Schedule reuses the retained selector and original recipient. The ordinary
 `plan schedule` command accepts authored Plans with schedule-supported inputs.
 See [sharing reviewed context and working on separate branches](AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
 
+### Scheduled writable rounds
+
+Start the app with the selected managed Pi profile and registered receiving
+checkout using the same `--scheduled-agent-*` options. First publish a verified
+candidate to the checkout's dedicated local branch using `runs advance-candidate`.
+Use a published receipt that has yet to bind a successor. The Schedule reserves
+that checkout, branch, and seed for the approved task list.
+
+Send an authenticated `POST /api/schedules/agent-branch/from-branch-advance`
+with the seed advancement ID, approved tasks in order, and interval in minutes.
+
+```json
+{
+  "seed_advance_id": "approach-a-001",
+  "interval_minutes": 5,
+  "tasks": [
+    {"task_id": "first", "prompt": "Implement the first approved change."},
+    {"task_id": "second", "prompt": "Implement the second approved change."}
+  ]
+}
+```
+
+The first due occurrence selects the first task and uses the published seed.
+After a successful round, the next due occurrence selects the next task and
+advances the branch using the preceding verified candidate. The fresh Agent Run
+uses the existing baseline and outgoing verifiers. The Schedule stores up to 32
+approved tasks in order. Task prompts remain in private runtime state. Schedule
+readback reports occurrences and their original Fleet Runs.
+
+Each occurrence records its task and branch advancement ID before Git work. A
+restart recovers the same pending publication or observes the same admitted Run.
+Resume with the same scoped native runtime. While paused, the Schedule starts
+no new writable Run. An already admitted child settles through Fleet. A
+failed or unverified predecessor stops progression. The last task's verified
+candidate remains available for explicit branch advancement after the list ends.
+[Local writable round setup](AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
+
 ## Schedule definitions are not workflow programs
 
 Valid:

@@ -9,6 +9,7 @@ from oh_goon.api.schemas.schedule import (
     RetainedReviewScheduleCreateRequest,
     ScheduleRunRequest,
     SharedPlanScheduleCreateRequest,
+    WritableScheduleCreateRequest,
 )
 from oh_goon.core.models.schedule import (
     ScheduleCatalog,
@@ -71,6 +72,26 @@ def create_from_retained_review(
     return service.schedule_retained_review(
         request.fleet_run_id,
         schedule_id=schedule_id,
+        name=request.name,
+        interval_minutes=request.interval_minutes,
+    )
+
+
+@router.post(
+    "/{schedule_id}/from-branch-advance",
+    response_model=ScheduleDefinition,
+    status_code=201,
+    operation_id="create_schedule_from_branch_advance",
+)
+def create_from_branch_advance(
+    schedule_id: str,
+    request: WritableScheduleCreateRequest,
+    service: ScheduleService = Depends(schedule_service),
+) -> ScheduleDefinition:
+    return service.create_writable_rounds(
+        schedule_id,
+        seed_advance_id=request.seed_advance_id,
+        tasks=request.tasks,
         name=request.name,
         interval_minutes=request.interval_minutes,
     )

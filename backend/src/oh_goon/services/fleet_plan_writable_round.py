@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,6 +14,7 @@ from oh_goon.core.models.branch_advance import (
     BranchAdvanceReceipt,
     PreparedBranchAdvance,
     branch_round_run_id,
+    writable_round_request_sha256,
 )
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedNativeAgentWorkload
 from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
@@ -22,7 +22,12 @@ from oh_goon.core.models.parallel_agent_work import parallel_native_selection_id
 from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerifier
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.writable_schedule import (
+    is_scheduled_branch_advance_id,
+    writable_native_selection_id,
+)
 from oh_goon.core.product_identity import repository_subject_instance_id
+from oh_goon.core.vocabulary import FleetRunSource
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.parallel_branch_advance import (
     PreparedBranchAdvance as PreparedGitBranchAdvance,
@@ -31,6 +36,8 @@ from oh_goon.integrations.parallel_branch_advance import sync_branch_checkout
 from oh_goon.integrations.parallel_candidate_verifier import require_verifier_executable
 from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.parallel_agent_work import read_parallel_verifier
+from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
+from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.fleet_plan_candidate import (
     require_native_candidate_selection,
@@ -48,16 +55,6 @@ def _published(store: BranchAdvanceStore, advance_id: str) -> BranchAdvanceRecei
     if receipt is None or receipt.published_at is None:
         raise StateConflict("Next Run requires its published branch advancement")
     return receipt
-
-
-def _request_sha256(*, selected: ResolvedNativeAgent, skill: Path | None, task: str) -> str:
-    payload = {
-        "native_selection_id": parallel_native_selection_id(selected),
-        "skill": str(skill) if skill is not None else None,
-        "task_sha256": hashlib.sha256(task.encode("utf-8")).hexdigest(),
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
 
 
 def _snapshot(prepared: PreparedBranchAdvance) -> PlanSnapshotEvidence:
@@ -81,6 +78,34 @@ def _verifier(
     return verifier
 
 
+def _require_selected_round(
+    database: LocalDatabase,
+    *,
+    prepared: PreparedBranchAdvance,
+    selected: ResolvedNativeAgent,
+    skill: Path | None,
+    task: str,
+    schedule_run_id: str | None,
+) -> None:
+    if schedule_run_id is None:
+        if is_scheduled_branch_advance_id(prepared.advance_id) or ScheduleDefinitionStore(
+            database
+        ).seed_reserved(prepared.advance_id):
+            raise StateConflict("Branch advancement belongs to a writable Schedule")
+        return
+    if skill is not None:
+        raise FleetPlanInvalid(
+            "Scheduled writable rounds require their frozen task without a Skill"
+        )
+    ScheduleExecutionStore(database).require_pending_writable_round(
+        schedule_run_id,
+        repository_id=prepared.repository_id,
+        advance_id=prepared.advance_id,
+        task_sha256=hashlib.sha256(task.encode("utf-8")).hexdigest(),
+        native_selection_id=writable_native_selection_id(selected),
+    )
+
+
 def require_writable_round_source(
     service: FleetPlanService,
     *,
@@ -90,6 +115,7 @@ def require_writable_round_source(
     workspace: Path,
     skill: Path | None,
     task: str,
+    schedule_run_id: str | None = None,
 ) -> tuple[PreparedBranchAdvance, RepositorySourceAuthority, ParallelCandidateVerifier]:
     """Bind reserved Run ingress to the durable request before candidate allocation."""
     database = service._workspace_database
@@ -103,11 +129,20 @@ def require_writable_round_source(
         or next_run.repository_subject_id is None
         or next_run.fleet_run_id != fleet_run_id
         or fleet_run_id != branch_round_run_id(advance_id)
-        or next_run.request_sha256 != _request_sha256(selected=selected, skill=skill, task=task)
+        or next_run.request_sha256
+        != writable_round_request_sha256(selected=selected, skill=skill, task=task)
         or prepared.repository_path != workspace
         or selected.session != PiSessionIntent(mode="ephemeral")
     ):
         raise StateConflict("Next Run differs from its published branch and bound request")
+    _require_selected_round(
+        database,
+        prepared=prepared,
+        selected=selected,
+        skill=skill,
+        task=task,
+        schedule_run_id=schedule_run_id,
+    )
     source = RepositorySourceAuthority.create(
         subject_instance_id=next_run.repository_subject_id,
         source_snapshot=_snapshot(prepared),
@@ -123,6 +158,7 @@ def start_writable_round(
     workspace: Path,
     skill: Path | None,
     task: str,
+    schedule_run_id: str | None = None,
 ) -> FleetRunState:
     """Synchronize an explicitly selected checkout and use original Fleet admission once."""
     from oh_goon.services.fleet_plans import require_native_task
@@ -147,7 +183,7 @@ def start_writable_round(
         repository = repositories.require_included(prepared.repository_id)
         if repository.path != workspace:
             raise StateConflict("Next Run requires the exact registered checkout")
-        request_sha256 = _request_sha256(selected=selected, skill=skill, task=task)
+        request_sha256 = writable_round_request_sha256(selected=selected, skill=skill, task=task)
         try:
             existing = service._runs.get(fleet_run_id).run
         except RunNotFound:
@@ -160,6 +196,10 @@ def start_writable_round(
                 or next_run.repository_subject_id is None
                 or next_run.fleet_run_id != fleet_run_id
                 or next_run.request_sha256 != request_sha256
+                or existing.source
+                is not (
+                    FleetRunSource.MANUAL if schedule_run_id is None else FleetRunSource.SCHEDULED
+                )
                 or not isinstance(target, FleetPlanTarget)
                 or target.candidate_workspace is None
                 or target.candidate_workspace.fleet_run_id != fleet_run_id
@@ -179,9 +219,27 @@ def start_writable_round(
                 != parallel_native_selection_id(selected)
             ):
                 raise StateConflict("Next Run identity is already bound to different intent")
+            if schedule_run_id is not None:
+                occurrence = ScheduleExecutionStore(database).find(schedule_run_id)
+                if occurrence is None or not any(
+                    child.repository_id == prepared.repository_id
+                    and child.fleet_run_id == fleet_run_id
+                    for child in occurrence.repository_runs
+                ):
+                    raise StateConflict("Next Run belongs to a different Schedule occurrence")
             target.require_candidate_native_intent()
             return existing
 
+        _require_selected_round(
+            database,
+            prepared=prepared,
+            selected=selected,
+            skill=skill,
+            task=task,
+            schedule_run_id=schedule_run_id,
+        )
+        if schedule_run_id is not None:
+            service.require_writable_round_runtime(selected, workspace)
         service.require_plan_ingress_preparation(fleet_run_id)
         if skill is not None:
             selected_skill = skill.resolve(strict=True)
@@ -209,8 +267,11 @@ def start_writable_round(
             store.bind_next_request(
                 advance_id, request_sha256=request_sha256, fleet_run_id=fleet_run_id
             )
+            git = (
+                service._native_git_service if schedule_run_id is not None else service._git_service
+            )
             sync_branch_checkout(
-                workspace_control_git(service._git_service),
+                workspace_control_git(git),
                 repository=prepared.branch_owner_path,
                 checkout=workspace,
                 prepared=PreparedGitBranchAdvance(
@@ -238,4 +299,5 @@ def start_writable_round(
                 fleet_run_id=fleet_run_id,
                 candidate=True,
                 branch_advance_id=advance_id,
+                schedule_run_id=schedule_run_id,
             )

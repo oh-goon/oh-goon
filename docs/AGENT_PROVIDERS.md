@@ -693,6 +693,10 @@ checks the resulting candidate independently. Inspect `runs verify-candidate`
 for the exact result. A passing successor can advance the same branch with a new
 advancement ID and the previous receipt's commit as the expected tip.
 
+To select approved tasks and advance between them on a wall-clock interval,
+reserve the initial published receipt in the existing Schedule before starting
+its successor. [Scheduled writable rounds](AUTOMATION_MODEL.md#scheduled-writable-rounds)
+
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,
 uncertain namespace/writer facts and lost acknowledgements retain their own

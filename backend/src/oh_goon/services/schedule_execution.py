@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from oh_goon.core.errors import FleetDomainError, RunNotFound, ScheduleExecutionStale
+from collections.abc import Callable
+
+from oh_goon.core.errors import (
+    ExecutionBusy,
+    FleetDomainError,
+    RunNotFound,
+    RuntimeSafetyBlocked,
+    RuntimeSafetyStale,
+    ScheduleExecutionStale,
+)
+from oh_goon.core.models.branch_advance import branch_round_run_id
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope
 from oh_goon.core.models.schedule import ScheduleFailure
 from oh_goon.core.models.schedule_execution import RunningScheduleRun, ScheduleRunRecord
+from oh_goon.core.models.writable_schedule import writable_schedule_run_id
 from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 from oh_goon.core.run_identity import require_fleet_run_binding
 from oh_goon.core.schedule_transitions import (
@@ -27,11 +38,23 @@ from oh_goon.services.schedule_admission import ScheduleAdmissionPlan
 class ScheduleExecutionEngine:
     """Fan one occurrence into independent repository Runs through the existing Fleet executor."""
 
-    def __init__(self, executions: ScheduleExecutionStore, runs: FleetRunControlPlane) -> None:
+    def __init__(
+        self,
+        executions: ScheduleExecutionStore,
+        runs: FleetRunControlPlane,
+        *,
+        start_writable: Callable[[RunningScheduleRun, str], None] | None = None,
+    ) -> None:
         self._executions = executions
         self._runs = runs
+        self._start_writable = start_writable
 
     def start(self, admission: ScheduleAdmissionPlan, *, schedule_run_id: str) -> ScheduleRunRecord:
+        writable = admission.intent.writable_round
+        if writable is not None and schedule_run_id != writable_schedule_run_id(
+            admission.intent.definition_generation_id, writable.task_index
+        ):
+            raise ScheduleExecutionStale("Writable occurrence differs from its selected task")
         initial = begin_schedule_run(
             schedule_run_id=schedule_run_id,
             schedule_id=admission.schedule_id,
@@ -117,21 +140,39 @@ class ScheduleExecutionEngine:
     def _start_repository(
         self, current: RunningScheduleRun, repository_id: str
     ) -> ScheduleRunRecord:
-        fleet_run_id = schedule_repository_fleet_run_id(current.schedule_run_id, repository_id)
-        scope = ExplicitRepositoryScope(repository_ids=(repository_id,))
+        writable = current.intent.writable_round
+        fleet_run_id = (
+            schedule_repository_fleet_run_id(current.schedule_run_id, repository_id)
+            if writable is None
+            else branch_round_run_id(writable.advance_id)
+        )
         try:
-            self._runs.start_bound(
-                current.intent.capability,
-                target=current.intent.target,
-                repository_scope=scope,
-                fleet_run_id=fleet_run_id,
-                source=FleetRunSource.SCHEDULED,
-                schedule_run_id=current.schedule_run_id,
-                expected_repository_instance_ids={
-                    repository_id: current.intent.repository_instance_ids[repository_id]
-                },
-            )
+            if writable is None:
+                self._runs.start_bound(
+                    current.intent.capability,
+                    target=current.intent.target,
+                    repository_scope=ExplicitRepositoryScope(repository_ids=(repository_id,)),
+                    fleet_run_id=fleet_run_id,
+                    source=FleetRunSource.SCHEDULED,
+                    schedule_run_id=current.schedule_run_id,
+                    expected_repository_instance_ids={
+                        repository_id: current.intent.repository_instance_ids[repository_id]
+                    },
+                )
+            else:
+                if self._start_writable is None:
+                    raise ScheduleExecutionStale(
+                        "Writable round is waiting for its configured runtime"
+                    )
+                self._start_writable(current, repository_id)
         except FleetDomainError as exc:
+            if writable is not None and isinstance(
+                exc,
+                (ScheduleExecutionStale, ExecutionBusy, RuntimeSafetyBlocked, RuntimeSafetyStale),
+            ):
+                # A pause, temporarily busy runtime, or concurrent admission does
+                # not consume a task. The original pending occurrence may retry.
+                return self._executions.get(current.schedule_run_id)
             # Admission failure belongs only to this target; other targets remain eligible.
             return self._cas(
                 current,

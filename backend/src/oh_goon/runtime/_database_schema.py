@@ -265,6 +265,16 @@ CREATE TABLE IF NOT EXISTS schedule_definitions (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schedule_writable_policies (
+    generation_id TEXT PRIMARY KEY REFERENCES schedule_definitions(generation_id) ON DELETE CASCADE,
+    seed_advance_id TEXT NOT NULL UNIQUE,
+    checkout_identity TEXT NOT NULL UNIQUE,
+    branch_owner_subject_id TEXT NOT NULL,
+    branch_ref TEXT NOT NULL,
+    policy_json TEXT NOT NULL CHECK (json_valid(policy_json) AND json_type(policy_json) = 'object'),
+    UNIQUE(branch_owner_subject_id, branch_ref)
+);
+
 CREATE TABLE IF NOT EXISTS schedule_executions (
     schedule_run_id TEXT PRIMARY KEY,
     schedule_id TEXT NOT NULL,

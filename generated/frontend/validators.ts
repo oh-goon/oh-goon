@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 7e0e9887d5050d3e6f9352c58af1f936bc3c88c27ac4401f89d16be344575bde
+// OPENAPI_SHA256: 362b283a3ee83367af7945831d67eec7309cb40a6cef85a915525a4ba7193afc
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -48,6 +48,7 @@ import { validateSharedPlanLockPreview, validateSharedPlanLockPreviewRequest, va
 import { validateSharedPlanScheduleCreateRequest } from "@generated/validatorParts/validatorPart063";
 import { validateSystemHealth, validateTeamRunRequest } from "@generated/validatorParts/validatorPart064";
 import { validateWaitingPlacementQueueEntry } from "@generated/validatorParts/validatorPart066";
+import { validateWritableScheduleCreateRequest } from "@generated/validatorParts/validatorPart067";
 
 export { ContractValidationError } from "@generated/validatorRuntime";
 
@@ -99,6 +100,10 @@ export function decodeOperationRequest(name: OperationName, value: unknown): unk
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationRequest", validateAgentContinuationRequest, value, "$", "continue_agent_campaign request", new Set());
+      return value;
+    }
+    case "create_schedule_from_branch_advance": {
+      validateReference("WritableScheduleCreateRequest", validateWritableScheduleCreateRequest, value, "$", "create_schedule_from_branch_advance request", new Set());
       return value;
     }
     case "create_schedule_from_retained_review": {
@@ -275,6 +280,10 @@ export function decodeOperationResponse(name: OperationName, value: unknown): un
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationResult", validateAgentContinuationResult, value, "$", "continue_agent_campaign response", new Set());
+      return value;
+    }
+    case "create_schedule_from_branch_advance": {
+      validateReference("ScheduleDefinition", validateScheduleDefinition, value, "$", "create_schedule_from_branch_advance response", new Set());
       return value;
     }
     case "create_schedule_from_retained_review": {

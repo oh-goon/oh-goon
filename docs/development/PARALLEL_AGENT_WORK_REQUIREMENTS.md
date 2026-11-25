@@ -269,13 +269,18 @@ detached source. Replaying the same request reopens its original receipt or Run.
 The successor runs the frozen baseline and outgoing verifiers in its own Step
 lifecycle. A verified result may authorize another advance on the same lineage.
 
+The [writable Schedule](../AUTOMATION_MODEL.md#scheduled-writable-rounds)
+selects the next entry from one immutable, operator-approved task list. The
+original Schedule occurrence records selection before publication or admission.
+The original Fleet admission commits the actual successor target and its
+Schedule binding together. Restart reopens the same selection, branch receipt
+and Run. A failed predecessor or an exhausted task list stops further selection.
+
 Advance unattended collaboration in this order and verify each boundary on the
 selected environment.
 
 | Boundary | Required behavior and proof |
 | --- | --- |
-| Writable round selection | Choose the next task and reviewed documents explicitly and inspect the original Run before advancing. A timed writable workflow needs a selection policy that can authorize those inputs and decide which verified candidate advances the branch. |
-| Branch advancement recovery | Preserve the exact local Git witness and original SQLite receipt across restart or acknowledgement loss. Prove stale refs, changed requests and unverified candidates refuse. Preserve a refusal when the original publication cannot be established. |
 | A second environment | Give each runtime its own registration, state, tool configuration and model authorization. Transfer explicit Git source and selected task documents. Demonstrate fresh repository evidence and native verification there, with controlled restart or loss of either environment. Remote publication and model egress follow their independently authorized owner. |
 | Cross-environment live notes | Admit task membership and note recipients on each worker, then prove simultaneous attributed delivery, cancellation fencing and retention on the selected transport. An exported document remains a practical handoff when no cross-host delivery is qualified. |
 

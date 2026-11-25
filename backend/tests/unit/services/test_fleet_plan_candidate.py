@@ -12,7 +12,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid, RunNotFound, StateConflict, WorkspaceStateStale
+from oh_goon.core.errors import (
+    FleetPlanInvalid,
+    RunNotFound,
+    ScheduleExecutionStale,
+    StateConflict,
+    WorkspaceStateStale,
+)
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -39,6 +45,7 @@ from oh_goon.integrations import source_snapshot
 from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.parallel_agent_work import replay_parallel_work
+from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services import fleet_plan_parallel_agents
 from oh_goon.services.fleet_plan_candidate import (
@@ -431,6 +438,24 @@ def test_successor_retry_preserves_published_source_and_original_authored_select
             skill=skill,
             task=task,
         )
+
+    with pytest.raises(ScheduleExecutionStale):
+        service.start_writable_round(
+            advance_id=prepared.advance_id,
+            selected=_candidate_selection(),
+            workspace=repository.path,
+            skill=None,
+            task="Not selected by an occurrence",
+            schedule_run_id="unrecorded-occurrence",
+        )
+    with monkeypatch.context() as reserved:
+        reserved.setattr(ScheduleDefinitionStore, "seed_reserved", lambda _store, _id: True)
+        with pytest.raises(StateConflict, match="belongs to a writable Schedule"):
+            start("Cannot take a reserved seed")
+    untouched = store.find(prepared.advance_id)
+    assert untouched is not None and untouched.next_run is None
+    sync.assert_not_called()
+    launched.assert_not_called()
 
     with pytest.raises(OSError, match="Interrupted before Run admission"):
         start("Use the reviewed task context")
