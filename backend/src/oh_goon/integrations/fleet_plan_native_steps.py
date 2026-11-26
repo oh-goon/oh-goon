@@ -38,8 +38,10 @@ from oh_goon.core.models.agent_providers import (
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, review_output_schema
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.fleet_observation import (
+    MAX_NATIVE_ADVISORY_CHARACTERS,
     AgentHarnessObservation,
     NativeAgentObservation,
+    NativeFinalAdvisory,
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedAgentStep
@@ -474,6 +476,7 @@ def _retained_native_summary(
     *,
     diagnostic: str,
     host_environment: Mapping[str, str],
+    publish_advisory: bool = False,
 ) -> AgentHarnessObservation:
     """Retain visible final claims only; missing native work stays explicit."""
     if text.strip():
@@ -489,11 +492,19 @@ def _retained_native_summary(
         prefix = "Native final summary unavailable: "
         content = "No final native claim was accepted; do not infer completion."
     content = redact_diagnostic_text(redact_host_secret_text(step, content, host_environment))
+    advisory = None
+    if publish_advisory and kind == "agent":
+        visible = content.strip()
+        if visible:
+            advisory = NativeFinalAdvisory(
+                text=visible[:MAX_NATIVE_ADVISORY_CHARACTERS],
+                omitted_characters=max(0, len(visible) - MAX_NATIVE_ADVISORY_CHARACTERS),
+            )
     summary = prefix + content
     if len(summary) > 4000:
         suffix = f" [omitted {len(summary) - 3900} summary characters; bounded journal claim]"
         summary = summary[:3900] + suffix
-    return AgentHarnessObservation(kind=kind, summary=summary)
+    return AgentHarnessObservation(kind=kind, summary=summary, final_advisory=advisory)
 
 
 def _native_observation_from_protocol(
@@ -1037,6 +1048,12 @@ def execute_native_agent_step(
                     parsed.final_text,
                     diagnostic=outcome.stderr if service_execution_failed else "",
                     host_environment=process.host_environment,
+                    publish_advisory=(
+                        step.workload.role == "report"
+                        and execution_returncode == 0
+                        and settled
+                        and not failed
+                    ),
                 )
                 omitted += max(0, len(events) + 1 - 128)
                 events = (*events[-127:], summary)

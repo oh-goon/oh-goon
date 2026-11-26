@@ -358,6 +358,15 @@ The reusable handoff view bounds source admissions, Steps and claim excerpts and
 reports every projection omission. Full recorded facts remain in the original
 Run events and Game Tape; transient raw output may be unavailable.
 
+For a passed native report Step with a settled successful conversation,
+`runs handoff --json` can include `final_advisory` on the final event in
+`recorded_steps.steps[].native_claims[].events`. The field contains redacted
+`text` capped at 512 characters and an `omitted_characters` count. Read this
+field directly when consuming advice. An absent field means no typed advice
+was recorded. The field carries the surrounding untrusted claim authority.
+Step settlement, cleanup, and independent verification retain their own
+recorded evidence.
+
 `runs feedback` returns the canonical bounded feedback also exposed by the Run
 API and existing Game Tape/campaign views. It binds the original Run, accepted
 Step/Attempt/physical identities, source admissions, redacted captured task,

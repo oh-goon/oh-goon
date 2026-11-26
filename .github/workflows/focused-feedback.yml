@@ -91,5 +91,5 @@ jobs:
           Failure, empty selection, interruption and timeout do not establish PASS.
           The next owner check is printed as UNVERIFIED guidance and is never executed.
           Mark the PR ready for review for candidate-bound merge verification.
-          Complete unrelated and exhaustive coverage runs in the daily campaign.
+          Scheduled full regression covers unrelated and exhaustive checks.
           EOF

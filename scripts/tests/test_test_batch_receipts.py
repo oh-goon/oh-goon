@@ -187,6 +187,9 @@ def test_native_parameter_ids_cannot_prefix_collide_in_completed_receipts(
     import subprocess
     import sys
 
+    from oh_goon.repository_tooling.pytest_batch_receipts import (
+        pytest_collection_finish,
+    )
     from oh_goon.repository_tooling.pytest_execution_membership import (
         ExecutionMembershipStore,
     )
@@ -203,12 +206,16 @@ def test_native_parameter_ids_cannot_prefix_collide_in_completed_receipts(
     test_file.write_text(
         "import pytest\nclass TestGroup:\n"
         f"    @pytest.mark.parametrize('value', [1, 2], ids={parameter_ids!r})\n"
-        "    def test_value(self, value): assert value in (1, 2)\n",
+        "    def test_value(self, value): assert value in (1, 2)\n"
+        "def test_file_fallback(): pass\n",
         encoding="utf-8",
     )
-    members = tuple(
-        f"{test_file}::TestGroup::test_value[{parameter_id}]"
-        for parameter_id in parameter_ids
+    members = (
+        test_file.name,
+        *(
+            f"{test_file}::TestGroup::test_value[{parameter_id}]"
+            for parameter_id in parameter_ids
+        ),
     )
     suite_identity = "sha256:" + "a" * 64
     plan_identity = "sha256:" + "b" * 64
@@ -243,7 +250,7 @@ def test_native_parameter_ids_cannot_prefix_collide_in_completed_receipts(
             "-c",
             str(root / "backend/pyproject.toml"),
             "-p",
-            "oh_goon.repository_tooling.pytest_batch_receipts",
+            pytest_collection_finish.__module__,
             str(test_file),
         ],
         cwd=tmp_path,
@@ -267,6 +274,15 @@ def test_native_parameter_ids_cannot_prefix_collide_in_completed_receipts(
     assert membership.duplicates == ()
     assert membership.extras == ()
     assert membership.terminal_success
+    outcomes = {
+        row["member"]: row["pytest_outcomes"]
+        for row in membership.effective_pytest_outcomes
+    }
+    for member in members:
+        items = outcomes[member]
+        selector = member.partition("::")[2] or "test_file_fallback"
+        assert isinstance(items, list) and len(items) == 1
+        assert items[0]["nodeid"].endswith(f"::{selector}")
 
 
 def test_resume_context_changes_with_correctness_inputs_but_not_batch_grouping(
