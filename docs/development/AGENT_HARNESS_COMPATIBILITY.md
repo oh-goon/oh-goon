@@ -1244,6 +1244,29 @@ facts and reports unknown session persistence. Continuation is refused,
 the bytes remain intact, and the tool effect occurs once. Power-loss
 durability remains unqualified.
 
+### Pi first-message session birth — HUG-134
+
+**Disposition**. Retain Pi 1.3.0's lazy file creation, the original claimed
+Run writer reservation, and the existing Pi save receipt. Pi can report
+a session ID, path, and setup entries while the selected file is still
+absent. The first user message can create the file before the provider
+returns a result. Native creation and close establish the file's physical
+state. Oh-Goon separately checks the correlated final entries and
+synchronizes the exact file and directory before recording its receipt.
+
+The [installed native probes][pi-session-tests] stop Pi by normal close and
+by cancellation before the first message. Both leave the session directory
+empty. The managed CLI rejects an empty prompt before opening application
+state. The [claimed Run cases](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+hold the first provider request and witness the user message on disk under
+the original writer reservation. A failed first turn can retain synchronized
+bytes while the Agent Step fails and its verifier stays unstarted. The
+managed reopen still requires an accepted original Agent result. A successful
+Run reopens the qualified save in a fresh Pi process. A crash after the first
+append preserves the unresolved slot under existing recovery
+and refuses continuation. Neither cut grants replay, and power-loss
+durability remains unqualified.
+
 ### Fresh Pi context after exact reopen — HUG-77
 
 **Disposition**. Retain the existing claimed Run worker, frozen prompt

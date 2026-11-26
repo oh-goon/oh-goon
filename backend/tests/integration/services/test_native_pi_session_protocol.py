@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Any, Literal
+from uuid import UUID
 
 import pytest
 
@@ -150,6 +151,20 @@ syncBuiltinESMExports();
 """
 
 
+_RPC_SETUP_QUERIES = b'{"id":"state","type":"get_state"}\n{"id":"entries","type":"get_entries"}\n'
+
+
+@dataclass
+class _OpenRpcSetupInput:
+    """Send only the setup queries and leave stdin open for cancellation."""
+
+    pending: bytes = _RPC_SETUP_QUERIES
+
+    def read_input(self, max_bytes: int) -> bytes | None:
+        chunk, self.pending = self.pending[:max_bytes], self.pending[max_bytes:]
+        return chunk or None
+
+
 class _PersistentStorageProbeInput:
     """Drive a selected installed storage probe through its original process input."""
 
@@ -228,7 +243,7 @@ class _PiProbe:
         session: Path | None = None,
         session_id: str | None = None,
         cwd: Path | None = None,
-        cancel_on_stream: bool = False,
+        cancel_on: Literal["assistant_stream", "rpc_setup"] | None = None,
         interrupt_rewrite: bool = False,
         persistent_storage: PiSessionDirectoryPin | None = None,
         storage_probe_command: str | None = None,
@@ -236,7 +251,7 @@ class _PiProbe:
         storage_turn = None
         if persistent_storage is not None:
             assert mode == "rpc" and prompt is not None and storage_probe_command is not None
-            assert session is None and session_id is None and not cancel_on_stream
+            assert session is None and session_id is None and cancel_on is None
             storage_turn = _PersistentStorageProbeInput(prompt)
         else:
             assert storage_probe_command is None
@@ -266,7 +281,7 @@ class _PiProbe:
         launcher: tuple[str, ...] = (str(self.program),)
         if interrupt_rewrite:
             assert mode == "rpc" and prompt is None and session_id is None
-            assert persistent_storage is None and not cancel_on_stream
+            assert persistent_storage is None and cancel_on is None
             assert selected_session == self.session and self.session.is_file()
             node = shutil.which("node", path="/usr/bin:/bin")
             assert node is not None
@@ -300,26 +315,36 @@ class _PiProbe:
             ),
             *((prompt,) if prompt is not None and storage_turn is None else ()),
         )
-        streaming = False
+        setup_input = None
+        if cancel_on == "rpc_setup":
+            assert mode == "rpc" and prompt is None and storage_turn is None
+            setup_input = _OpenRpcSetupInput()
+        cancellation_ready = False
         pending = ""
 
         def observe(_stream: Literal["stdout", "stderr"], text: str) -> None:
-            nonlocal streaming, pending
+            nonlocal cancellation_ready, pending
             if _stream == "stdout" and storage_turn is not None:
                 storage_turn.observe_stdout(text)
-            if _stream != "stdout" or not cancel_on_stream:
+            if _stream != "stdout" or cancel_on is None:
                 return
             pending += text
             assert len(pending) <= 65536, "Native protocol record exceeded probe bound"
             while "\n" in pending:
                 line, pending = pending.split("\n", 1)
                 event = json.loads(line)
-                if (
+                if cancel_on == "rpc_setup":
+                    if event["type"] == "response" and event["id"] == "entries":
+                        assert event["success"] is True
+                        cancellation_ready = True
+                elif (
                     event.get("type") == "message_start"
                     and event.get("message", {}).get("role") == "assistant"
                 ):
-                    streaming = True
+                    cancellation_ready = True
 
+        input_source = storage_turn or setup_input
+        initial_input = _RPC_SETUP_QUERIES if mode == "rpc" else b""
         request = StandardIsolatedProcessRequest(
             workspace=workspace,
             cwd=cwd or (workspace if persistent_storage is not None else workspace / "project"),
@@ -338,22 +363,14 @@ class _PiProbe:
             private_configuration_directory=config,
             read_only_workspace=persistent_storage is not None,
             pi_session_directory=persistent_storage,
-            input_source=storage_turn,
-            input_data=(
-                (
-                    b'{"id":"state","type":"get_state"}\n{"id":"entries","type":"get_entries"}\n'
-                    if storage_turn is None
-                    else None
-                )
-                if mode == "rpc"
-                else b""
-            ),
+            input_source=input_source,
+            input_data=initial_input if input_source is None else None,
         )
         try:
             result = self.backend.execute(
                 request,
                 timeout=20,
-                cancel_requested=(lambda: streaming) if cancel_on_stream else None,
+                cancel_requested=(lambda: cancellation_ready) if cancel_on is not None else None,
                 stream_output=observe,
             )
             assert result.supervisor.final_process_group_quiescent
@@ -381,7 +398,7 @@ class _PiProbe:
             )
             return result
         except CommandCancelledError as error:
-            assert streaming, "Cancellation did not reach the native assistant turn"
+            assert cancellation_ready, f"Cancellation did not reach {cancel_on}"
             assert error.physical_execution_id
             assert error.physical_execution_id not in self.executions
             self.executions.add(error.physical_execution_id)
@@ -393,7 +410,7 @@ class _PiProbe:
                         "cancelled": True,
                         "physical_execution_id": error.physical_execution_id,
                         "supervisor": error.supervisor.receipt_identity,
-                        "assistant_started": streaming,
+                        "cancelled_after": cancel_on,
                     }
                 )
             )
@@ -438,14 +455,28 @@ def pi_probe(tmp_path: Path) -> _PiProbe:
     return _PiProbe(tmp_path, program, public_runtime, BubblewrapProcessIsolation(bwrap))
 
 
-def _records(result: CommandResult) -> list[dict[str, Any]]:
-    assert result.returncode == 0, result.stderr
+def _records(result: CommandResult | CommandCancelledError) -> list[dict[str, Any]]:
+    if isinstance(result, CommandResult):
+        assert result.returncode == 0, result.stderr
     return [json.loads(line) for line in result.stdout.split("\n") if line.strip()]
 
 
-def _state(probe: _PiProbe, **options: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    responses = {item["id"]: item for item in _records(probe.launch(mode="rpc", **options))}
+def _state(
+    probe: _PiProbe, *, cancel_after_setup: bool = False, **options: Any
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result: CommandResult | CommandCancelledError
+    if cancel_after_setup:
+        with pytest.raises(CommandCancelledError) as stopped:
+            probe.launch(mode="rpc", cancel_on="rpc_setup", **options)
+        result = stopped.value
+        assert result.supervisor.final_process_group_quiescent
+        assert result.supervisor.cleanup_reason == "cancel"
+    else:
+        result = probe.launch(mode="rpc", **options)
+    records = _records(result)
+    responses = {item["id"]: item for item in records}
     assert responses.keys() == {"state", "entries"}
+    assert len(records) == len(responses)
     assert all(item["success"] for item in responses.values())
     return responses["state"]["data"], responses["entries"]["data"]
 
@@ -898,11 +929,22 @@ def test_installed_pi_pre_prompt_gate_refuses_unproved_reopen_authority(
         assert pi_probe.session.read_bytes() == retained
 
 
-def test_installed_pi_new_identity_and_close_do_not_prove_file_birth(pi_probe: _PiProbe) -> None:
-    state, entries = _state(pi_probe)
-    assert state["sessionId"]
-    assert not any(entry["type"] == "message" for entry in entries["entries"])
+@pytest.mark.parametrize("cancel_after_setup", [False, True], ids=["close", "cancel"])
+def test_installed_pi_setup_ends_without_file_birth(
+    pi_probe: _PiProbe, cancel_after_setup: bool
+) -> None:
     assert not pi_probe.session.exists()
+
+    state, entries = _state(pi_probe, cancel_after_setup=cancel_after_setup)
+
+    assert str(UUID(state["sessionId"])) == state["sessionId"]
+    assert state["sessionFile"] == "/workspace/sessions/selected.jsonl"
+    assert state["messageCount"] == 0
+    setup = entries["entries"]
+    assert {"model_change", "thinking_level_change"} <= {entry["type"] for entry in setup}
+    assert entries["leafId"] == setup[-1]["id"]
+    assert all(entry["type"] != "message" for entry in setup)
+    assert not tuple(pi_probe.session.parent.iterdir())
 
 
 def test_installed_pi_session_id_selector_is_not_exact_open(pi_probe: _PiProbe) -> None:
@@ -1044,7 +1086,7 @@ def test_installed_pi_foreign_project_selection_is_not_an_authorization(pi_probe
 
 def test_installed_pi_interrupted_turn_retains_prompt_without_success(pi_probe: _PiProbe) -> None:
     with pytest.raises(CommandCancelledError) as stopped:
-        pi_probe.launch(prompt="WP00_CANARY WP00_HANG", cancel_on_stream=True)
+        pi_probe.launch(prompt="WP00_CANARY WP00_HANG", cancel_on="assistant_stream")
     assert stopped.value.supervisor.final_process_group_quiescent
     assert stopped.value.supervisor.cleanup_reason == "cancel"
     state, entries = _state(pi_probe)
