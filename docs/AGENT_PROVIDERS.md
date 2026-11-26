@@ -226,6 +226,13 @@ Public Run detail and Fleet Snapshot omit private Pi task excerpts, native
 payloads, and free-form review records while reporting Step settlement.
 HTTP cancellation acknowledgements also omit private Pi task excerpts.
 
+Managed persistent Pi runs one turn on the session selected at admission.
+The Step owns the native command stream and uses its private session path
+even if the project sets a native session directory. In-Run session switching,
+creation, fork, clone, steering, and extension interaction are unsupported.
+Select `new` or an eligible saved Run through a separately admitted Run.
+A queued prompt acknowledgement leaves the managed turn unverified.
+
 ### Inspect and retire a saved Pi session
 
 A managed persistent Pi Run retains sensitive native conversation bytes in the
