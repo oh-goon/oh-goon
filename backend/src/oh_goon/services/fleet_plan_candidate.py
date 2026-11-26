@@ -9,7 +9,7 @@ import sys
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict, WorkspaceFenceUnproven
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
@@ -21,7 +21,10 @@ from oh_goon.core.models.effect_attempt import ClaimedRepositoryEffectAttempt
 from oh_goon.core.models.fleet_plan import DEFAULT_COMMAND_TIMEOUT_SECONDS, ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult, PlanSnapshotEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.models.parallel_candidate_verification import is_parallel_verifier_step_id
+from oh_goon.core.models.parallel_candidate_verification import (
+    is_baseline_verifier_step_id,
+    is_parallel_verifier_step_id,
+)
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
@@ -52,6 +55,58 @@ from oh_goon.runtime.workspace_leases import NativeWorkspaceQuiescence, Workspac
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority, _worktree_git_environment
 from oh_goon.services.agent_authoring_sources import require_native_agent_source_path_privacy
 from oh_goon.services.repositories import RepositoryService
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.branch_advance import BranchAdvanceReceipt
+
+
+def require_branch_round_candidate(
+    database: LocalDatabase, admission: CandidateWorkspaceAdmission, repository: Path
+) -> BranchAdvanceReceipt:
+    from oh_goon.runtime.branch_advances import BranchAdvanceStore
+
+    receipt = BranchAdvanceStore(database).find_by_next_run(admission.fleet_run_id)
+    if receipt is None or receipt.published_at is None or receipt.next_run is None:
+        raise StateConflict("Writable round lacks its published branch advancement")
+    prepared = receipt.preparation
+    captured = admission.source.source_snapshot
+    if (
+        admission.parallel_work_id is not None
+        or prepared.repository_path != repository
+        or prepared.repository_id != admission.workspace.repository_id
+        or receipt.next_run.repository_subject_id != admission.source.subject_instance_id
+        or prepared.commit != admission.workspace.base_revision
+        or (
+            prepared.verification.source_sha256,
+            prepared.source_byte_count,
+            prepared.source_entry_count,
+        )
+        != (captured.sha256, captured.byte_count, captured.entry_count)
+    ):
+        raise StateConflict("Writable round differs from its verified receiving source")
+    return receipt
+
+
+def require_current_branch_round_tip(receipt: BranchAdvanceReceipt, *, git: GitService) -> None:
+    from oh_goon.integrations.parallel_branch_advance import (
+        PreparedBranchAdvance,
+        require_published_branch_advance,
+    )
+
+    prepared = receipt.preparation
+    owner = prepared.branch_owner_path
+    with RepositoryWorkspaceAuthority.pin_bare_branch_owner(owner) as (_, require_current):
+        RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+            owner, prepared.branch_owner_subject_id
+        )
+        require_published_branch_advance(
+            git,
+            repository=owner,
+            prepared=PreparedBranchAdvance(
+                prepared.branch_ref, prepared.expected_tip, prepared.commit, prepared.tree
+            ),
+            require_current=require_current,
+        )
 
 
 def workspace_control_git(git: GitService | None = None) -> GitService:
@@ -166,6 +221,7 @@ def prepare_candidate_workspace(
     expected_source: RepositorySourceAuthority | None = None,
     expected_subject: str | None = None,
     expected_base_revision: str | None = None,
+    expected_source_branch: str | None = None,
     parallel_work_id: str | None = None,
     validate_candidate_path: Callable[[Path], None] | None = None,
 ) -> CandidateWorkspaceAdmission:
@@ -197,6 +253,8 @@ def prepare_candidate_workspace(
                 and observation.head_sha != expected_base_revision
             ):
                 raise StateConflict("Registered candidate base changed before preparation")
+            if expected_source_branch is not None and observation.branch != expected_source_branch:
+                raise StateConflict("Registered candidate branch changed before preparation")
             if parallel_work_id is None:
                 candidate = workspaces.request(
                     repository_id=repository.repository_id,
@@ -247,6 +305,7 @@ def prepare_candidate_workspace(
                 captured,
                 expected_state_version=allocated.state_version,
                 git=control,
+                expected_source_branch=expected_source_branch,
             )
             require_source_current()
             if repository_subject_instance_id(repository.path) != subject:
@@ -358,20 +417,38 @@ class CandidateExecution:
         ):
             raise StateConflict("Candidate execution differs from original admitted Run authority")
         require_native_candidate_selection(target.plan.native_agent)
-        self.verifier = (
-            read_parallel_verifier(database, admission.parallel_work_id)
-            if admission.parallel_work_id is not None
+        from oh_goon.core.models.branch_advance import is_branch_round_run_id
+
+        branch = (
+            require_branch_round_candidate(database, admission, effect.repository.path)
+            if is_branch_round_run_id(admission.fleet_run_id)
             else None
         )
-        if admission.parallel_work_id is not None:
-            assert self.verifier is not None
+        if branch is not None:
+            require_current_branch_round_tip(branch, git=self._control)
+        work_id = (
+            branch.preparation.verification.parallel_work_id
+            if branch is not None
+            else admission.parallel_work_id
+        )
+        self.verifier = read_parallel_verifier(database, work_id) if work_id is not None else None
+        if self.verifier is not None:
             step = target.plan.steps[-1]
             if (
                 not isinstance(step, ResolvedCommandStep)
                 or not is_parallel_verifier_step_id(step.step_id)
                 or step.argv != self.verifier.argv
             ):
-                raise StateConflict("Parallel candidate Step differs from its admitted verifier")
+                raise StateConflict("Candidate Step differs from its admitted verifier")
+            if branch is not None:
+                baseline = target.plan.steps[0]
+                if (
+                    self.verifier.identity != branch.preparation.verification.verifier_id
+                    or not isinstance(baseline, ResolvedCommandStep)
+                    or not is_baseline_verifier_step_id(baseline.step_id)
+                    or baseline.argv != self.verifier.argv
+                ):
+                    raise StateConflict("Writable baseline Step differs from its admitted verifier")
             require_verifier_executable(self.verifier)
         backend_configuration_id = target.plan.native_agent.backend_configuration_id
         if backend_configuration_id is None:

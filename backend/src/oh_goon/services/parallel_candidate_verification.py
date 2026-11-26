@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +10,7 @@ from typing import Literal
 
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid, StateConflict
 from oh_goon.core.file_digest import sha256_file_with_size
+from oh_goon.core.models.branch_advance import is_branch_round_run_id
 from oh_goon.core.models.candidate_workspace import CandidateRunInspection
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult
@@ -17,6 +19,7 @@ from oh_goon.core.models.parallel_candidate_verification import (
     ParallelCandidateExport,
     ParallelCandidateVerification,
     ParallelCandidateVerifierObservation,
+    is_baseline_verifier_step_id,
     is_parallel_verifier_step_id,
 )
 from oh_goon.core.models.run import FleetRunDetail
@@ -29,12 +32,19 @@ from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.content_snapshot_proof import snapshot_metadata_fingerprint
 from oh_goon.integrations.exact_file_write import publish_prepared_file
 from oh_goon.integrations.fleet_content_store import FleetContentStore
-from oh_goon.integrations.parallel_candidate_patch import prepare_native_candidate_patch
+from oh_goon.integrations.parallel_candidate_patch import (
+    NativeCandidatePatch,
+    prepare_native_candidate_patch,
+)
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution_evidence_acceptance import ExecutionEvidenceAcceptanceAuthority
 from oh_goon.runtime.parallel_agent_work import read_parallel_verifier, read_parallel_work
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
-from oh_goon.services.fleet_plan_candidate import inspect_candidate_run, workspace_control_git
+from oh_goon.services.fleet_plan_candidate import (
+    inspect_candidate_run,
+    require_branch_round_candidate,
+    workspace_control_git,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +52,14 @@ class _CandidateVerificationRead:
     inspection: CandidateRunInspection
     verification: ParallelCandidateVerification
     observation: ParallelCandidateVerifierObservation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedCandidatePatch:
+    patch: NativeCandidatePatch
+    verification: ParallelCandidateVerification
+    source: SnapshotIdentity
+    require_current: Callable[[], None]
 
 
 def _incomplete(candidate: _CandidateVerificationRead, reason: str) -> _CandidateVerificationRead:
@@ -60,17 +78,24 @@ def _read_verification(
     current = inspect_candidate_run(run_id, database=database, detail=detail)
     admission = current.admission
     work_id = admission.parallel_work_id
+    branch = None
     if work_id is None:
-        raise FleetPlanInvalid("Candidate has no original parallel work verifier")
-    work = read_parallel_work(database, work_id)
+        if not is_branch_round_run_id(run_id) or len(detail.run.targets) != 1:
+            raise FleetPlanInvalid("Candidate has no original frozen verifier")
+        branch = require_branch_round_candidate(database, admission, detail.run.targets[0].path)
+        work_id = branch.preparation.verification.parallel_work_id
+    else:
+        work = read_parallel_work(database, work_id)
+        if (
+            work.intent.source != admission.source
+            or work.intent.repository_id != admission.workspace.repository_id
+            or work.intent.base_revision != admission.workspace.base_revision
+            or run_id not in {child.fleet_run_id for child in work.intent.children}
+        ):
+            raise StateConflict("Candidate does not belong to its original parallel work")
     verifier = read_parallel_verifier(database, work_id)
-    if (
-        work.intent.source != admission.source
-        or work.intent.repository_id != admission.workspace.repository_id
-        or work.intent.base_revision != admission.workspace.base_revision
-        or run_id not in {child.fleet_run_id for child in work.intent.children}
-    ):
-        raise StateConflict("Candidate does not belong to its original parallel work")
+    if branch is not None and verifier.identity != branch.preparation.verification.verifier_id:
+        raise StateConflict("Writable candidate lost its original frozen verifier")
     candidate = _CandidateVerificationRead(
         current,
         ParallelCandidateVerification(
@@ -109,6 +134,29 @@ def _read_verification(
     operation = operations[0]
     evidence = operation.evidence
     assert isinstance(evidence, FleetPlanOperationEvidence)
+    if branch is not None:
+        baseline = evidence.plan.steps[0] if evidence.plan.steps else None
+        source = admission.source.source_snapshot
+        observation = (
+            baseline.attempts[0].parallel_verifier
+            if baseline is not None and len(baseline.attempts) == 1
+            else None
+        )
+        if (
+            baseline is None
+            or not is_baseline_verifier_step_id(baseline.step_id)
+            or baseline.argv != verifier.argv
+            or baseline.settlement.outcome != "SUCCESS"
+            or baseline.settlement.cleanup != "VERIFIED"
+            or observation is None
+            or observation.verifier_id != verifier.identity
+            or observation.postcondition != "UNCHANGED"
+            or (observation.source_sha256, observation.byte_count, observation.entry_count)
+            != (source.sha256, source.byte_count, source.entry_count)
+        ):
+            return _incomplete(
+                candidate, "Receiving source did not pass its frozen baseline verifier"
+            )
     verifications = tuple(
         step
         for step in evidence.plan.steps
@@ -224,6 +272,85 @@ def verify_parallel_candidate(
     ).verification
 
 
+def _require_verified_candidate(
+    detail: FleetRunDetail,
+    *,
+    database: LocalDatabase,
+    checkpoint_id: str,
+    git: GitService,
+) -> _CandidateVerificationRead:
+    selected = _read_verification(detail, database=database, git=git)
+    if (
+        selected.verification.outcome != "PASS"
+        or selected.verification.checkpoint_id != checkpoint_id
+        or selected.observation is None
+        or selected.inspection.checkpoint is None
+        or selected.inspection.path is None
+    ):
+        raise FleetPlanInvalid("Select the current exact verified candidate checkpoint")
+    return selected
+
+
+def _prepare_verified_patch(
+    selected: _CandidateVerificationRead,
+    *,
+    database: LocalDatabase,
+    scratch: Path,
+    git: GitService,
+) -> VerifiedCandidatePatch:
+    current, observation = selected.inspection, selected.observation
+    checkpoint = current.checkpoint
+    assert checkpoint is not None and observation is not None and current.path is not None
+    admission = current.admission
+    workspaces = RepositoryWorkspaceAuthority(database, initialize=False)
+    base = workspaces.read_snapshot_binding(admission.source_workspace)
+    if (base.identity.sha256, base.identity.byte_count, base.identity.entry_count) != (
+        admission.checkpoint.source_sha256,
+        admission.checkpoint.byte_count,
+        admission.checkpoint.entry_count,
+    ):
+        raise StateConflict("Candidate base differs from the original admitted source")
+    path = Path(current.path)
+    source = SnapshotIdentity(
+        checkpoint.source_sha256, checkpoint.byte_count, checkpoint.entry_count
+    )
+
+    def require_current() -> None:
+        if (
+            workspaces.current_candidate_checkpoint(admission.workspace, git=git) != checkpoint
+            or snapshot_metadata_fingerprint(path) != observation.workspace_fingerprint
+            or workspaces.state(admission.workspace.workspace_id) != current.state
+        ):
+            raise StateConflict("Candidate changed while preparing its verified patch")
+
+    patch = prepare_native_candidate_patch(
+        git,
+        original=path,
+        original_revision=admission.workspace.base_revision,
+        base_snapshot=base.snapshot_path,
+        base_identity=base.identity,
+        candidate_identity=source,
+        scratch=scratch,
+    )
+    require_current()
+    return VerifiedCandidatePatch(patch, selected.verification, source, require_current)
+
+
+def prepare_verified_candidate_patch(
+    detail: FleetRunDetail,
+    *,
+    database: LocalDatabase,
+    checkpoint_id: str,
+    scratch: Path,
+    git: GitService,
+) -> VerifiedCandidatePatch:
+    """Prepare the same verified native patch used for operator export."""
+    selected = _require_verified_candidate(
+        detail, database=database, checkpoint_id=checkpoint_id, git=git
+    )
+    return _prepare_verified_patch(selected, database=database, scratch=scratch, git=git)
+
+
 def export_parallel_candidate(
     detail: FleetRunDetail,
     *,
@@ -235,28 +362,11 @@ def export_parallel_candidate(
 ) -> ParallelCandidateExport:
     """Publish an exact verified patch without touching the developer checkout."""
     control = workspace_control_git(git)
-    selected = _read_verification(detail, database=database, git=control)
-    verification = selected.verification
+    selected = _require_verified_candidate(
+        detail, database=database, checkpoint_id=checkpoint_id, git=control
+    )
     current = selected.inspection
-    observation = selected.observation
-    checkpoint = current.checkpoint
-    if (
-        verification.outcome != "PASS"
-        or verification.checkpoint_id != checkpoint_id
-        or observation is None
-        or checkpoint is None
-        or current.path is None
-    ):
-        raise FleetPlanInvalid("Export requires the current exact verified candidate checkpoint")
-    admission = current.admission
-    workspaces = RepositoryWorkspaceAuthority(database, initialize=False)
-    base = workspaces.read_snapshot_binding(admission.source_workspace)
-    if (base.identity.sha256, base.identity.byte_count, base.identity.entry_count) != (
-        admission.checkpoint.source_sha256,
-        admission.checkpoint.byte_count,
-        admission.checkpoint.entry_count,
-    ):
-        raise StateConflict("Candidate export base differs from the original admitted source")
+    assert current.path is not None
     target = destination.expanduser().absolute()
     path = Path(current.path)
     if (
@@ -274,27 +384,19 @@ def export_parallel_candidate(
         )
     ):
         raise FleetPlanInvalid("Export requires a new file outside the source and execution state")
-    candidate_identity = SnapshotIdentity(
-        checkpoint.source_sha256, checkpoint.byte_count, checkpoint.entry_count
-    )
     cleanup: Literal["VERIFIED", "UNVERIFIED"] = "VERIFIED"
     temporary = TemporaryDirectory(prefix=".oh-goon-candidate-export-", dir=target.parent)
-    owner = admission.workspace.repository_id
+    owner = current.admission.workspace.repository_id
     retained = None
     try:
         stage = Path(temporary.name)
-        patch, paths = prepare_native_candidate_patch(
-            control,
-            original=path,
-            original_revision=admission.workspace.base_revision,
-            base_snapshot=base.snapshot_path,
-            base_identity=base.identity,
-            candidate_identity=candidate_identity,
-            scratch=stage,
-        )
+        verified = _prepare_verified_patch(selected, database=database, scratch=stage, git=control)
         retained = content_store.put_file(
             RepositoryScopedPath.create(
-                owner_repository_id=owner, root=stage, path=patch, label="verified candidate patch"
+                owner_repository_id=owner,
+                root=stage,
+                path=verified.patch.path,
+                label="verified candidate patch",
             )
         )
         artifact = stage / "artifact"
@@ -306,12 +408,7 @@ def export_parallel_candidate(
             expected_identity=retained.identity,
         )
         patch_sha256, patch_size = sha256_file_with_size(artifact)
-        if (
-            workspaces.current_candidate_checkpoint(admission.workspace, git=control) != checkpoint
-            or snapshot_metadata_fingerprint(path) != observation.workspace_fingerprint
-            or workspaces.state(admission.workspace.workspace_id) != current.state
-        ):
-            raise StateConflict("Candidate changed while preparing export")
+        verified.require_current()
         publish_prepared_file(artifact, target)
     finally:
         if retained is not None:
@@ -325,10 +422,10 @@ def export_parallel_candidate(
             cleanup = "UNVERIFIED"
     assert retained is not None
     return ParallelCandidateExport(
-        verification=verification,
+        verification=verified.verification,
         destination=str(target),
         sha256=patch_sha256,
         byte_count=patch_size,
-        changed_paths=paths,
+        changed_paths=verified.patch.changed_paths,
         cleanup=cleanup,
     )

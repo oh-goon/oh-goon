@@ -263,8 +263,8 @@ and PR work selects affected fast tests, applicable static/contracts and the
 smallest meaningful real boundary proof through the same admission owner.
 Use `make check`/`make test` for relevant focused feedback and `make merge-check`
 for candidate-bound proof. Unrelated complete suites and expensive journeys run
-once daily; do not duplicate them locally before submitting a PR. A necessary
-slow security/isolation/durability proof or defect reproducer is a named narrow
+on the full regression schedule; do not duplicate them locally before submitting
+a PR. A necessary slow security/isolation/durability proof or defect reproducer is a named narrow
 exception, never automatic full-owner expansion. Unknown protection scope stays
 `SELECTION_UNVERIFIED` or uses a justified bounded fallback.
 
@@ -292,9 +292,9 @@ For chat resets, use the [session continuation guide](docs/development/CHATGPT_I
 
 Routine CI keeps affected meaningful process and scale regressions. Mark only exhaustive
 variants with bounded ordinary counterparts as `slow`; `daily` separately marks
-expensive ordinary journeys. Keep both in complete daily `make release-check`
-verification. Changed daily logic needs meaningful bounded validation; collection
-alone cannot replace execution. Remove obsolete filename/private-name/prose
+expensive ordinary journeys. Keep both in scheduled full regression and complete
+`make release-check` verification. Changed daily logic needs meaningful bounded
+validation; collection alone cannot replace execution. Remove obsolete filename/private-name/prose
 assertions, and require a valid baseline for every mutation regression. See
 `docs/development/TEST_QUALITY.md` and `docs/CI_CD_CONTRACT.md`.
 

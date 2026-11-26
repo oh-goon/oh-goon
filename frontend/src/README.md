@@ -122,7 +122,7 @@ existing Plan, repository and Schedule fixture owners, with persistence coordina
 by `BrowserFixtureApiClient`.
 ## Change impact
 
-Frontend changes normally stay frontend-local: run affected colocated tests and `make -C .. check`. Add only applicable boundary proof; complete frontend portfolios run daily. The following owners guide the additional proof:
+Frontend changes normally stay frontend-local: run affected colocated tests and `make -C .. check`. Add only applicable boundary proof; complete frontend portfolios run on the full regression schedule. The following owners guide the additional proof:
 
 ```text
 features/<feature>/ or components/common/ → colocated tests + applicable frontend static checks

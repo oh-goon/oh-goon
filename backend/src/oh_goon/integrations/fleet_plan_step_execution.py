@@ -65,6 +65,7 @@ from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.parallel_candidate_verification import (
     VERIFIER_SOURCE_ROOT,
     ParallelCandidateVerifier,
+    is_baseline_verifier_step_id,
     is_parallel_verifier_step_id,
 )
 from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
@@ -282,6 +283,7 @@ class StepRuntime:
     workspace_directory_fd: int | None = None
     require_candidate_current: Callable[[], None] | None = None
     candidate_verifier: ParallelCandidateVerifier | None = None
+    candidate_baseline: SnapshotIdentity | None = None
     project_sources: Mapping[str, Path] = field(default_factory=dict)
     project_workspaces: Mapping[str, Path] = field(default_factory=dict)
     on_unsettled_run_process: Callable[[], None] | None = None
@@ -1133,7 +1135,10 @@ def _execute_command_step(
     repository: Path, step: ResolvedCommandStep, process: _StepProcess, runtime: StepRuntime
 ) -> StepOutcome:
     argv = step.argv
-    if runtime.candidate_verifier is not None and is_parallel_verifier_step_id(step.step_id):
+    is_baseline = is_baseline_verifier_step_id(step.step_id)
+    if runtime.candidate_verifier is not None and (
+        is_parallel_verifier_step_id(step.step_id) or is_baseline
+    ):
         verifier = runtime.candidate_verifier
         if argv != verifier.argv or runtime.require_candidate_current is None:
             raise FleetPlanInvalid(
@@ -1143,6 +1148,8 @@ def _execute_command_step(
         source, workspace_fingerprint, mounts = prepare_parallel_verifier(
             repository, process.paths.config, verifier, cancel_requested=runtime.cancel_requested
         )
+        if is_baseline and source != runtime.candidate_baseline:
+            raise FleetPlanInvalid("Receiving source differs from its published branch advancement")
         result = from_command(
             process.command_runner(
                 *argv,
@@ -1155,16 +1162,16 @@ def _execute_command_step(
                 read_only_mount_cwd=VERIFIER_SOURCE_ROOT,
             )
         )
-        return replace(
-            result,
-            parallel_verifier=observe_parallel_verifier_result(
-                repository,
-                source,
-                workspace_fingerprint,
-                verifier,
-                cancel_requested=runtime.cancel_requested,
-            ),
+        observation = observe_parallel_verifier_result(
+            repository,
+            source,
+            workspace_fingerprint,
+            verifier,
+            cancel_requested=runtime.cancel_requested,
         )
+        if is_baseline and observation.postcondition != "UNCHANGED":
+            raise FleetPlanInvalid("Receiving source changed during its baseline verification")
+        return replace(result, parallel_verifier=observation)
     if step.uv is not None and argv[:3] != ("uv", "run", f"--{step.uv.lock_mode}"):
         raise FleetPlanInvalid(f"Native uv argv mode differs from resolved step {step.step_id}")
     managed = process.managed_runtime

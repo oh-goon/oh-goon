@@ -425,6 +425,7 @@ class FleetRunControlPlane:
         content_store: FleetContentStore | None = None,
         worker_configuration: Callable[[str], Callable[[ExecutionTicket], RunWorkerLaunch]]
         | None = None,
+        native_worker_configuration: Callable[[str], RunWorkerPreparation] | None = None,
         worker_exit_recovery: Callable[[str], None] | None = None,
         run_capacity: ResolvedNativeRuntimeBudget | None = None,
     ) -> None:
@@ -438,6 +439,7 @@ class FleetRunControlPlane:
         self._schedule_executions = schedule_executions
         self._content_store = content_store
         self._worker_configuration = worker_configuration
+        self._native_worker_configuration = native_worker_configuration
         self._worker_exit_recovery = worker_exit_recovery
         self._run_capacity = run_capacity
         self._drain_runs: tuple[str, ...] = ()
@@ -536,6 +538,8 @@ class FleetRunControlPlane:
         expected_repository_instance_ids: dict[str, str] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         created_agent_deliveries: tuple[AgentStepDeliveryReference, ...] = (),
+        branch_advance_id: str | None = None,
+        schedule_run_id: str | None = None,
     ) -> FleetRunState:
         """Start only a Fleet Plan target already frozen by FleetPlanService."""
         if created_agent_deliveries and (
@@ -559,6 +563,8 @@ class FleetRunControlPlane:
                 readmitted_from_run_id=None,
                 rerun_from_run_id=None,
                 requested_priority=requested_priority,
+                branch_advance_id=branch_advance_id,
+                schedule_run_id=schedule_run_id,
             )
         except BaseException as exc:
             failure = exc
@@ -705,10 +711,27 @@ class FleetRunControlPlane:
         rerun_from_run_id: str | None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         schedule_run_id: str | None = None,
+        branch_advance_id: str | None = None,
     ) -> FleetRunState:
         # Fail before repository planning or lease attempts when deployment
         # explicitly requires signed Fleet admission but has no trust binding.
         fleet_run_id = fleet_run_id or new_fleet_run_id()
+        from oh_goon.core.models.branch_advance import branch_round_run_id, is_branch_round_run_id
+
+        if branch_advance_id is not None or is_branch_round_run_id(fleet_run_id):
+            if (
+                branch_advance_id is None
+                or branch_round_run_id(branch_advance_id) != fleet_run_id
+                or source not in (FleetRunSource.MANUAL, FleetRunSource.SCHEDULED)
+                or readmitted_from_run_id is not None
+                or rerun_from_run_id is not None
+                or not isinstance(intent.target, FleetPlanTarget)
+                or intent.target.candidate_workspace is None
+                or intent.target.candidate_workspace.fleet_run_id != fleet_run_id
+                or not isinstance(repository_scope, ExplicitRepositoryScope)
+                or len(repository_scope.repository_ids) != 1
+            ):
+                raise StateConflict("Writable round requires its original branch advancement")
 
         def require_scheduled_child() -> None:
             if source is not FleetRunSource.SCHEDULED:
@@ -779,9 +802,16 @@ class FleetRunControlPlane:
                 return existing
             FleetRunLifecycle.require_agent_history_authorization(intent.target)
             self._supervisor.require_accepting()
-            if self._worker_configuration is None:
+            worker_configuration = self._worker_configuration
+            if (
+                self._native_worker_configuration is not None
+                and isinstance(intent.target, FleetPlanTarget)
+                and intent.target.plan.native_agent is not None
+            ):
+                worker_configuration = self._native_worker_configuration
+            if worker_configuration is None:
                 raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")
-            prepare_worker = self._worker_configuration(fleet_run_id)
+            prepare_worker = worker_configuration(fleet_run_id)
             concurrency = (
                 prepare_worker.concurrency if type(prepare_worker) is RunWorkerPreparation else None
             )
@@ -803,6 +833,30 @@ class FleetRunControlPlane:
                 expected_repository_instance_ids=expected_repository_instance_ids,
                 **concurrent_planning,
             )
+            if branch_advance_id is not None:
+                assert isinstance(intent.target, FleetPlanTarget)
+                assert intent.target.candidate_workspace is not None
+                (entry,) = plan.targets
+                self._lifecycle.require_writable_round_candidate(
+                    intent.target.candidate_workspace,
+                    entry.repository.path,
+                    branch_advance_id,
+                    schedule_run_id=schedule_run_id,
+                )
+            if (
+                source is FleetRunSource.SCHEDULED
+                and isinstance(intent.target, FleetPlanTarget)
+                and (native := intent.target.plan.native_agent) is not None
+            ):
+                if (
+                    type(prepare_worker) is not RunWorkerPreparation
+                    or prepare_worker.require_native_binding is None
+                ):
+                    raise FleetPlanInvalid(
+                        "Scheduled native Run requires an original worker binding"
+                    )
+                (entry,) = plan.targets
+                prepare_worker.require_native_binding(entry.repository.path, native)
             concurrent_admission: _ConcurrentAdmissionArguments = {}
             if concurrency is not None:
                 assert type(prepare_worker) is RunWorkerPreparation

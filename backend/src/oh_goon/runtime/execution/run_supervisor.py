@@ -25,6 +25,7 @@ from oh_goon.engine.command import (
 )
 
 if TYPE_CHECKING:
+    from oh_goon.core.models.agent_providers import ResolvedNativeAgent
     from oh_goon.runtime.execution.coordinator import ExecutionTicket
 
 
@@ -70,6 +71,10 @@ class RunWorkerPreparation:
     prepare: Callable[[ExecutionTicket], RunWorkerLaunch] = field(repr=False)
     concurrency: RunConcurrencyAdmission | None = None
     deferred_resource_scope: dict[str, JsonValue] | None = field(default=None, repr=False)
+    require_native_binding: Callable[[Path, ResolvedNativeAgent], None] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.concurrency is not None and self.concurrency.fleet_run_id != self.fleet_run_id:

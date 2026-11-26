@@ -67,6 +67,14 @@ _NATIVE_SETUP_REQUIREMENTS = {
         "managed-inference profile. Its workspace roots must permit the owned candidate. "
         "Review the selected profile; existing direct execution remains separately selected.",
     ),
+    "CANDIDATE_SOURCE_SELECTION_INCOMPLETE": (
+        "exact_candidate_branch_and_head",
+        "Select --expect-branch and --expect-head together with --candidate.",
+    ),
+    "REVIEW_MODE_UNAVAILABLE": (
+        "headless_read_only_review",
+        "Run --review without --interactive or --verify. Run verification separately with its own authority.",
+    ),
     "RESOURCE_ISOLATION_REQUIRED": (
         "isolated_resource_limits",
         "Resource caps require a native isolated execution profile; select a supported isolated profile.",
@@ -97,6 +105,8 @@ class _NativeCliRequirementError(AgentProviderError):
 class _CandidateRunOptions(TypedDict, total=False):
     candidate: bool
     fleet_run_id: str
+    expected_candidate_branch: str
+    expected_candidate_base_revision: str
 
 
 def add_ai_command[_Parser: argparse.ArgumentParser](
@@ -114,11 +124,19 @@ def add_ai_command[_Parser: argparse.ArgumentParser](
     )
     parser.add_argument("--workspace", type=Path, default=Path(), help="Git repository root")
     parser.add_argument("--skill", type=Path, help="Caller-selected Skill source")
-    parser.add_argument(
+    behavior = parser.add_mutually_exclusive_group()
+    behavior.add_argument(
         "--candidate",
         action="store_true",
         help="Edit an owned candidate through headless Pi/Bubblewrap; retain the developer checkout",
     )
+    behavior.add_argument(
+        "--review",
+        action="store_true",
+        help="Run a headless typed review with read-only repository access in a fresh session",
+    )
+    parser.add_argument("--expect-branch", help="Require this exact source branch for --candidate")
+    parser.add_argument("--expect-head", help="Require this full Git object ID for --candidate")
     parser.add_argument(
         "--handoff-from",
         metavar="RUN_ID",
@@ -229,6 +247,7 @@ def resolve_native_cli_selection(
     config_file: Path | None,
     interactive: bool | None = False,
     session: PiSessionIntent | None = None,
+    role: str = "report",
 ) -> tuple[ResolvedNativeAgent, ProcessIsolationBackend | None, GitService]:
     """Resolve a single catalog and native workload before application mutation."""
     from oh_goon.engine.git import GitService
@@ -253,7 +272,7 @@ def resolve_native_cli_selection(
             selected.profile.codex_login is None and selected.profile.codex_service is None
         )
     selected = replace(selected, interactive=interactive)
-    require_native_agent_compatibility(selected, terminal_available=interactive)
+    require_native_agent_compatibility(selected, role=role, terminal_available=interactive)
     if selected.uses_persistent_pi_session:
         from oh_goon.runtime.pi_session_storage import require_pi_session_repository
 
@@ -303,19 +322,35 @@ def native_plan_selection(
 def run_ai_command(args: argparse.Namespace) -> int:
     session = None
     try:
+        review = getattr(args, "review", False)
+        candidate = getattr(args, "candidate", False)
+        expected_branch = getattr(args, "expect_branch", None)
+        expected_head = getattr(args, "expect_head", None)
+        if (expected_branch is None) != (expected_head is None) or (
+            expected_branch is not None and not candidate
+        ):
+            raise _NativeCliRequirementError("CANDIDATE_SOURCE_SELECTION_INCOMPLETE")
         choices = args.session or ()
         if len(choices) > 1:
             raise PiSessionSelectionError("Select one Pi session with --session")
         session = PiSessionIntent.from_selector(choices[0]) if choices else None
+        if review:
+            if args.interactive or args.verify:
+                raise _NativeCliRequirementError("REVIEW_MODE_UNAVAILABLE")
+            if session is not None and session.persistent:
+                raise PiSessionSelectionError("A read-only review requires a fresh session")
+            if args.agent == "pi" and session is None:
+                session = PiSessionIntent(mode="ephemeral")
         require_pi_session_execution(
             session,
             agent=args.agent,
             interactive=args.interactive,
             handoff=args.handoff_from is not None,
         )
-        if session is not None and session.persistent and getattr(args, "candidate", False):
+        if session is not None and session.persistent and candidate:
             raise PiSessionSelectionError("Persistent Pi sessions require the direct repository")
-        interactive = False if session is not None else _interactive(args)
+        interactive = False if review or session is not None else _interactive(args)
+        role = "review" if review else "report"
         task = _task(args)
         workspace = args.workspace.expanduser().resolve(strict=True)
         skill = args.skill.expanduser().resolve(strict=True) if args.skill is not None else None
@@ -332,8 +367,9 @@ def run_ai_command(args: argparse.Namespace) -> int:
             config_file=args.config,
             interactive=interactive,
             session=session,
+            role=role,
         )
-        if getattr(args, "candidate", False):
+        if candidate:
             from oh_goon.core.errors import FleetPlanInvalid
             from oh_goon.services.fleet_plan_candidate import require_native_candidate_selection
 
@@ -357,7 +393,10 @@ def run_ai_command(args: argparse.Namespace) -> int:
                 task,
                 verification,
                 handoff_from=args.handoff_from,
-                candidate=getattr(args, "candidate", False),
+                candidate=candidate,
+                role=role,
+                expected_branch=expected_branch,
+                expected_head=expected_head,
             )
         if selected.uses_persistent_pi_session:
             from oh_goon.cli_plan_run_readback import (
@@ -377,7 +416,7 @@ def run_ai_command(args: argparse.Namespace) -> int:
         else:
             print(f"Status: {detail.run.status.value}")
             print(f"Outcome: {detail.outcome.value}")
-            if getattr(args, "candidate", False):
+            if candidate:
                 _print_candidate_result(detail)
         return result
     except KeyboardInterrupt as interruption:
@@ -491,6 +530,9 @@ def _run_and_close(
     *,
     handoff_from: str | None = None,
     candidate: bool = False,
+    role: str = "report",
+    expected_branch: str | None = None,
+    expected_head: str | None = None,
 ) -> tuple[int, FleetRunDetail]:
     from oh_goon.cli import _shutdown_after_completed_command, _shutdown_after_primary_failure
 
@@ -504,6 +546,9 @@ def _run_and_close(
             verification,
             handoff_from=handoff_from,
             candidate=candidate,
+            role=role,
+            expected_branch=expected_branch,
+            expected_head=expected_head,
         )
         if result not in (0, 130, 143):
             if selected.uses_persistent_pi_session:
@@ -597,6 +642,9 @@ def _run_selected(
     *,
     handoff_from: str | None = None,
     candidate: bool = False,
+    role: str = "report",
+    expected_branch: str | None = None,
+    expected_head: str | None = None,
 ) -> tuple[int, FleetRunDetail]:
     from oh_goon.cli_plan_run_readback import run_handoff_projection
     from oh_goon.services.fleet_plans import _native_prior_context
@@ -608,6 +656,9 @@ def _run_selected(
 
         proposed_id = new_fleet_run_id()
         candidate_options = {"candidate": True, "fleet_run_id": proposed_id}
+        if expected_branch is not None and expected_head is not None:
+            candidate_options["expected_candidate_branch"] = expected_branch
+            candidate_options["expected_candidate_base_revision"] = expected_head
         print(f"Proposed Fleet Run ID: {proposed_id}", file=sys.stderr)
         _print_handoff_reference(proposed_id)
     try:
@@ -634,6 +685,7 @@ def _run_selected(
             skill=skill,
             task=task,
             verification=verification,
+            role=role,
             prior_context=prior_context,
             **candidate_options,
         )

@@ -4,8 +4,11 @@ import json
 import sqlite3
 
 from oh_goon.core.errors import ScheduleExecutionActive, ScheduleExecutionStale
+from oh_goon.core.models.branch_advance import branch_round_run_id, writable_round_request_sha256
 from oh_goon.core.models.capability import CapabilitySnapshot
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedNativeAgentWorkload
 from oh_goon.core.models.schedule_execution import (
+    CompletedScheduleRun,
     FailedScheduleRun,
     RunningScheduleRun,
     ScheduledFleetRunIntent,
@@ -13,10 +16,21 @@ from oh_goon.core.models.schedule_execution import (
     parse_schedule_run,
 )
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.writable_schedule import (
+    ScheduledWritableRound,
+    writable_native_selection_id,
+    writable_schedule_run_id,
+)
 from oh_goon.core.product_identity import schedule_repository_fleet_run_id
-from oh_goon.core.vocabulary import ScheduleExecutionStatus, ScheduleRepositoryRunStatus
+from oh_goon.core.vocabulary import (
+    ScheduleExecutionStatus,
+    ScheduleRepositoryRunStatus,
+    ScheduleState,
+)
+from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.durable_revision import require_durable_revision
+from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 
 
 class ScheduleExecutionStore:
@@ -48,10 +62,28 @@ class ScheduleExecutionStore:
 
     def find(self, schedule_run_id: str) -> ScheduleRunRecord | None:
         with self._database.transaction() as c:
-            row = c.execute(
-                "SELECT * FROM schedule_executions WHERE schedule_run_id=?", (schedule_run_id,)
-            ).fetchone()
-        return _execution(row) if row is not None else None
+            return _find_in(c, schedule_run_id)
+
+    def require_pending_writable_round(
+        self,
+        schedule_run_id: str,
+        *,
+        repository_id: str,
+        advance_id: str,
+        task_sha256: str,
+        native_selection_id: str,
+    ) -> ScheduledWritableRound:
+        """Prove the selected task and branch advance before any external preparation."""
+        with self._database.transaction() as connection:
+            current = _require_pending_in(connection, schedule_run_id, repository_id)
+            selected = _require_writable_selection_in(connection, current)
+        if (
+            selected.advance_id != advance_id
+            or selected.task.prompt_sha256 != task_sha256
+            or selected.native_selection_id != native_selection_id
+        ):
+            raise ScheduleExecutionStale("Writable work differs from its frozen Schedule selection")
+        return selected
 
     def require_pending_child_binding(
         self,
@@ -70,29 +102,20 @@ class ScheduleExecutionStore:
         by the original lease/strict-placement transaction: no separate scheduler
         reservation or duplicate execution-policy authority is introduced here.
         """
-        current = self.find(schedule_run_id)
-        if not isinstance(current, RunningScheduleRun):
-            raise ScheduleExecutionStale("Scheduled Fleet child has no active durable occurrence")
-        expected_id = schedule_repository_fleet_run_id(schedule_run_id, repository_id)
-        if fleet_run_id != expected_id:
-            raise ScheduleExecutionStale("Scheduled Fleet child identity is not occurrence-bound")
-        if (
-            current.intent.capability != capability
-            or current.intent.target != target
-            or repository_instance_ids
-            != {repository_id: current.intent.repository_instance_ids.get(repository_id)}
-            or repository_id not in current.intent.repository_scope.repository_ids
-        ):
-            raise ScheduleExecutionStale(
-                "Scheduled Fleet child does not match frozen occurrence authority"
+        with self._database.transaction() as connection:
+            current = _require_pending_in(connection, schedule_run_id, repository_id)
+            actual = _bound_child_instances_in(
+                connection,
+                current=current,
+                repository_id=repository_id,
+                fleet_run_id=fleet_run_id,
+                capability=capability,
+                target=target,
             )
-        if not any(
-            row.repository_id == repository_id
-            and row.status is ScheduleRepositoryRunStatus.PENDING
-            and row.fleet_run_id is None
-            for row in current.repository_runs
-        ):
-            raise ScheduleExecutionStale("Scheduled Fleet child is no longer pending admission")
+        if repository_instance_ids != actual:
+            raise ScheduleExecutionStale(
+                "Scheduled Fleet child source instance differs from its authority"
+            )
 
     def bind_admitted_child_in(
         self,
@@ -114,35 +137,29 @@ class ScheduleExecutionStore:
             raise ScheduleExecutionStale("Scheduled child needs original active Fleet transaction")
         if not isinstance(target, FleetPlanTarget):
             raise ScheduleExecutionStale("Scheduled child requires frozen Fleet Plan")
-        row = connection.execute(
-            "SELECT * FROM schedule_executions WHERE schedule_run_id=?", (schedule_run_id,)
-        ).fetchone()
-        if row is None:
-            raise ScheduleExecutionStale("Scheduled occurrence disappeared before Fleet admission")
-        current = _execution(row)
-        if not isinstance(current, RunningScheduleRun):
-            raise ScheduleExecutionStale("Scheduled occurrence cancelled before Fleet admission")
-        if (
-            fleet_run_id != schedule_repository_fleet_run_id(schedule_run_id, repository_id)
-            or current.intent.capability != capability
-            or current.intent.target != target
-            or repository_id not in current.intent.repository_scope.repository_ids
-        ):
-            raise ScheduleExecutionStale("Scheduled child differs from frozen occurrence authority")
-        if not any(
-            item.repository_id == repository_id
-            and item.status is ScheduleRepositoryRunStatus.PENDING
-            and item.fleet_run_id is None
-            for item in current.repository_runs
-        ):
-            raise ScheduleExecutionStale("Scheduled child already consumed or cancelled")
+        current = _require_pending_in(connection, schedule_run_id, repository_id)
+        instances = _bound_child_instances_in(
+            connection,
+            current=current,
+            repository_id=repository_id,
+            fleet_run_id=fleet_run_id,
+            capability=capability,
+            target=target,
+        )
         from oh_goon.core.schedule_transitions import mark_repository_running
 
+        promote_intent = current.intent.writable_round is not None
+        if promote_intent:
+            intent = current.intent.model_copy(
+                update={"target": target, "repository_instance_ids": instances}
+            )
+            current = current.model_copy(update={"intent": intent})
         updated = mark_repository_running(current, repository_id, fleet_run_id)
         self._update(
             connection,
             _with_record_version(updated, current.record_version + 1),
             expected_revision=current.record_version,
+            write_intent=promote_intent,
         )
 
     def latest_for_schedule_in(
@@ -151,6 +168,19 @@ class ScheduleExecutionStore:
         row = c.execute(
             "SELECT * FROM schedule_executions WHERE schedule_id=? ORDER BY started_at DESC LIMIT 1",
             (schedule_id,),
+        ).fetchone()
+        return _execution(row) if row is not None else None
+
+    @staticmethod
+    def latest_writable_for_generation_in(
+        c: sqlite3.Connection, schedule_id: str, generation_id: str
+    ) -> ScheduleRunRecord | None:
+        row = c.execute(
+            "SELECT * FROM schedule_executions WHERE schedule_id=? "
+            "AND json_extract(intent_json, '$.definition_generation_id')=? "
+            "AND json_type(intent_json, '$.writable_round.task_index')='integer' "
+            "ORDER BY json_extract(intent_json, '$.writable_round.task_index') DESC LIMIT 1",
+            (schedule_id, generation_id),
         ).fetchone()
         return _execution(row) if row is not None else None
 
@@ -241,7 +271,13 @@ class ScheduleExecutionStore:
         )
 
     @staticmethod
-    def _update(c: sqlite3.Connection, e: ScheduleRunRecord, *, expected_revision: int) -> None:
+    def _update(
+        c: sqlite3.Connection,
+        e: ScheduleRunRecord,
+        *,
+        expected_revision: int,
+        write_intent: bool = False,
+    ) -> None:
         failure_json = (
             e.failure.model_dump_json(exclude_computed_fields=True)
             if isinstance(e, FailedScheduleRun) and e.failure is not None
@@ -249,7 +285,7 @@ class ScheduleExecutionStore:
         )
         finished = e.finished_at.isoformat() if not isinstance(e, RunningScheduleRun) else None
         cur = c.execute(
-            """UPDATE schedule_executions SET repository_runs_json=?, status=?, attention_json=?, failure_json=?, finished_at=?, record_version=? WHERE schedule_run_id=? AND record_version=?""",
+            """UPDATE schedule_executions SET repository_runs_json=?, status=?, attention_json=?, failure_json=?, finished_at=?, record_version=?, intent_json=COALESCE(?, intent_json) WHERE schedule_run_id=? AND record_version=?""",
             (
                 json.dumps(
                     [
@@ -266,6 +302,7 @@ class ScheduleExecutionStore:
                 failure_json,
                 finished,
                 e.record_version,
+                e.intent.model_dump_json(exclude_computed_fields=True) if write_intent else None,
                 e.schedule_run_id,
                 expected_revision,
             ),
@@ -274,6 +311,151 @@ class ScheduleExecutionStore:
             raise ScheduleExecutionStale(
                 f"Schedule execution changed concurrently: {e.schedule_run_id}"
             )
+
+
+def _find_in(connection: sqlite3.Connection, schedule_run_id: str) -> ScheduleRunRecord | None:
+    row = connection.execute(
+        "SELECT * FROM schedule_executions WHERE schedule_run_id=?", (schedule_run_id,)
+    ).fetchone()
+    return _execution(row) if row is not None else None
+
+
+def _require_pending_in(
+    connection: sqlite3.Connection, schedule_run_id: str, repository_id: str
+) -> RunningScheduleRun:
+    current = _find_in(connection, schedule_run_id)
+    if current is None:
+        raise ScheduleExecutionStale("Scheduled occurrence disappeared before Fleet admission")
+    if not isinstance(current, RunningScheduleRun):
+        raise ScheduleExecutionStale("Scheduled occurrence cancelled before Fleet admission")
+    if not any(
+        row.repository_id == repository_id
+        and row.status is ScheduleRepositoryRunStatus.PENDING
+        and row.fleet_run_id is None
+        for row in current.repository_runs
+    ):
+        raise ScheduleExecutionStale("Scheduled Fleet child is no longer pending admission")
+    return current
+
+
+def _require_writable_selection_in(
+    connection: sqlite3.Connection, current: RunningScheduleRun
+) -> ScheduledWritableRound:
+    selected = current.intent.writable_round
+    row = connection.execute(
+        "SELECT generation_id, state FROM schedule_definitions WHERE schedule_id=?",
+        (current.schedule_id,),
+    ).fetchone()
+    if (
+        selected is None
+        or row is None
+        or row["generation_id"] != current.intent.definition_generation_id
+        or row["state"] != ScheduleState.ACTIVE.value
+    ):
+        raise ScheduleExecutionStale("Writable Schedule has no active selected occurrence")
+    policy = ScheduleDefinitionStore.writable_policy_in(
+        connection, current.intent.definition_generation_id
+    )
+    if (
+        policy is None
+        or selected.task_index >= len(policy.tasks)
+        or selected.task != policy.tasks[selected.task_index]
+        or selected.native_selection_id != policy.native_selection_id
+    ):
+        raise ScheduleExecutionStale("Writable occurrence task differs from its authored policy")
+    if selected.task_index == 0:
+        if selected.advance_id != policy.seed_advance_id:
+            raise ScheduleExecutionStale("Writable occurrence does not bind its reserved seed")
+    else:
+        previous = _find_in(
+            connection,
+            writable_schedule_run_id(
+                current.intent.definition_generation_id, selected.task_index - 1
+            ),
+        )
+        if (
+            not isinstance(previous, CompletedScheduleRun)
+            or previous.schedule_id != current.schedule_id
+            or previous.intent.repository_scope != current.intent.repository_scope
+            or previous.intent.writable_round is None
+            or previous.repository_runs[0].status is not ScheduleRepositoryRunStatus.SUCCESSFUL
+            or previous.repository_runs[0].fleet_run_id != selected.predecessor_run_id
+        ):
+            raise ScheduleExecutionStale("Writable occurrence lacks its successful predecessor Run")
+    return selected
+
+
+def _bound_child_instances_in(
+    connection: sqlite3.Connection,
+    *,
+    current: RunningScheduleRun,
+    repository_id: str,
+    fleet_run_id: str,
+    capability: CapabilitySnapshot,
+    target: FleetPlanTarget,
+) -> dict[str, str]:
+    if current.intent.capability != capability:
+        raise ScheduleExecutionStale(
+            "Scheduled Fleet child differs from frozen capability authority"
+        )
+    if current.intent.writable_round is None:
+        if (
+            fleet_run_id != schedule_repository_fleet_run_id(current.schedule_run_id, repository_id)
+            or current.intent.target != target
+        ):
+            raise ScheduleExecutionStale(
+                "Scheduled Fleet child differs from frozen occurrence authority"
+            )
+        return {repository_id: current.intent.repository_instance_ids[repository_id]}
+
+    selected = _require_writable_selection_in(connection, current)
+    receipt = BranchAdvanceStore.find_in(connection, selected.advance_id)
+    candidate = target.candidate_workspace
+    if (
+        fleet_run_id != branch_round_run_id(selected.advance_id)
+        or receipt is None
+        or receipt.published_at is None
+        or receipt.next_run is None
+        or receipt.next_run.fleet_run_id != fleet_run_id
+        or receipt.next_run.repository_subject_id is None
+        or candidate is None
+        or candidate.fleet_run_id != fleet_run_id
+        or candidate.workspace.repository_id != repository_id
+        or receipt.preparation.repository_id != repository_id
+        or candidate.workspace.base_revision != receipt.preparation.commit
+        or candidate.source.subject_instance_id != receipt.next_run.repository_subject_id
+    ):
+        raise ScheduleExecutionStale("Writable child differs from its published branch receipt")
+    verified = receipt.preparation.verification
+    source = candidate.source.source_snapshot
+    agents = tuple(step for step in target.plan.steps if isinstance(step, ResolvedAgentStep))
+    if (
+        (
+            selected.predecessor_run_id is not None
+            and verified.fleet_run_id != selected.predecessor_run_id
+        )
+        or (source.sha256, source.byte_count, source.entry_count)
+        != (
+            verified.source_sha256,
+            receipt.preparation.source_byte_count,
+            receipt.preparation.source_entry_count,
+        )
+        or len(agents) != 1
+        or agents[0].task_sha256 != selected.task.prompt_sha256
+        or not isinstance(agents[0].workload, ResolvedNativeAgentWorkload)
+        or writable_native_selection_id(agents[0].workload.native_agent)
+        != selected.native_selection_id
+        or target.plan.native_agent is None
+        or writable_native_selection_id(target.plan.native_agent) != selected.native_selection_id
+        or receipt.next_run.request_sha256
+        != writable_round_request_sha256(
+            selected=target.plan.native_agent, skill=None, task=selected.task.prompt
+        )
+    ):
+        raise ScheduleExecutionStale(
+            "Writable child differs from its frozen task, profile or source"
+        )
+    return {repository_id: receipt.next_run.repository_subject_id}
 
 
 def _execution(row: sqlite3.Row) -> ScheduleRunRecord:

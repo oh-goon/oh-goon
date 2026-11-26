@@ -306,6 +306,11 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
         "SKIPPED",
     ]
     assert failed_steps[2]["exit_code"] == 1
+    assert all(
+        artifact["status"] != "PRESENT"
+        for step in failed_steps
+        for artifact in step["artifacts"]
+    )
     assert {s["step_execution_id"] for s in failed_steps}.isdisjoint(
         s["step_execution_id"] for _, original, _ in history for s in _steps(original)
     )
@@ -358,18 +363,10 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
     assert not forbidden.exists()
 
 
-# Evaluation is the bounded ordinary Run-level stopping proof. Direct native
-# refusals below cover the other application guards; their full Run variants
-# retain separate daily lifecycle evidence.
-@pytest.mark.parametrize(
-    "stage",
-    [
-        pytest.param("ingest", marks=pytest.mark.daily),
-        pytest.param("train", marks=pytest.mark.daily),
-        "evaluate",
-        pytest.param("publish", marks=pytest.mark.daily),
-    ],
-)
+# The history journey above covers evaluation refusal and preserves an older model.
+# These cases exercise failures at the other native stages.
+@pytest.mark.daily
+@pytest.mark.parametrize("stage", ["ingest", "train", "publish"])
 def test_iris_pipeline_stage_failure_cannot_publish_a_model(
     tmp_path: Path, stage: str
 ) -> None:
@@ -387,10 +384,6 @@ def test_iris_pipeline_stage_failure_cannot_publish_a_model(
         declaration["steps"][1]["run"] = (
             "iris-pipeline train --data ${{ steps.ingest.outputs.DATA }} --max-iterations 1"
         )
-    elif stage == "evaluate":
-        configuration = yaml.safe_load(selected.read_text())
-        configuration["inputs"] = {"minimum_accuracy_percent": 100}
-        selected.write_text(yaml.safe_dump(configuration, sort_keys=False))
     else:
         # This is a real rejected verdict from the same native model, not a
         # public simulation flag. The workflow still evaluates normally first.
