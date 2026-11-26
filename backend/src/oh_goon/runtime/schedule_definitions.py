@@ -16,12 +16,18 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.models.writable_schedule import WritableSchedulePolicy
+from oh_goon.core.models.writable_schedule import (
+    ApprovedTaskBatch,
+    ApprovedTaskDocument,
+    WritableSchedulePolicy,
+    WritableScheduleTask,
+)
 from oh_goon.core.product_identity import new_schedule_generation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import ScheduleState
 from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.durable_revision import require_durable_revision
 
 
 class ScheduleDefinitionStore:
@@ -78,6 +84,125 @@ class ScheduleDefinitionStore:
         if policy.seed_advance_id != row["seed_advance_id"]:
             raise StateConflict("Writable Schedule policy differs from its reserved seed")
         return policy
+
+    def bind_approved_task_document(
+        self,
+        schedule_id: str,
+        *,
+        expected_generation_id: str,
+        document: ApprovedTaskDocument,
+    ) -> ScheduleDefinition:
+        """Bind one explicitly selected document to the original writable Schedule."""
+        with self._database.transaction(write=True) as connection:
+            definition = self.get_in(connection, schedule_id)
+            generation_id = definition.generation_id
+            if generation_id != expected_generation_id:
+                raise ScheduleDefinitionStale(
+                    "Approved task document requires the current Schedule"
+                )
+            if self.writable_policy_in(connection, generation_id) is None:
+                raise StateConflict("Approved task documents require a writable Schedule")
+            original = self.approved_task_document_in(connection, generation_id)
+            if original is not None:
+                if original != document:
+                    raise StateConflict("Writable Schedule already binds another approved document")
+                return definition
+            connection.execute(
+                "INSERT INTO schedule_approved_task_documents (generation_id, document_json) "
+                "VALUES (?, ?)",
+                (generation_id, document.model_dump_json()),
+            )
+            return definition
+
+    @staticmethod
+    def approved_task_document_in(
+        connection: sqlite3.Connection, generation_id: str
+    ) -> ApprovedTaskDocument | None:
+        try:
+            row = connection.execute(
+                "SELECT document_json FROM schedule_approved_task_documents WHERE generation_id=?",
+                (generation_id,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if str(exc) != "no such table: schedule_approved_task_documents":
+                raise
+            return None
+        return (
+            None if row is None else ApprovedTaskDocument.model_validate_json(row["document_json"])
+        )
+
+    @staticmethod
+    def writable_task_in(
+        connection: sqlite3.Connection,
+        generation_id: str,
+        policy: WritableSchedulePolicy,
+        index: int,
+    ) -> WritableScheduleTask | None:
+        if index < 0:
+            return None
+        if index < len(policy.tasks):
+            return policy.tasks[index]
+        try:
+            row = connection.execute(
+                "SELECT task_json FROM schedule_approved_tasks WHERE generation_id=? AND task_index=?",
+                (generation_id, index),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if str(exc) != "no such table: schedule_approved_tasks":
+                raise
+            return None
+        return None if row is None else WritableScheduleTask.model_validate_json(row["task_json"])
+
+    def append_approved_tasks(
+        self,
+        generation_id: str,
+        *,
+        expected_task_index: int,
+        expected_durable_revision: int,
+        tasks: tuple[WritableScheduleTask, ...],
+    ) -> int:
+        """Freeze new approvals at the exact append ordinal without changing any selection."""
+        batch = ApprovedTaskBatch(tasks=tasks)
+        with self._database.transaction(write=True) as connection:
+            require_durable_revision(connection, expected_durable_revision)
+            policy = self.writable_policy_in(connection, generation_id)
+            if policy is None or self.approved_task_document_in(connection, generation_id) is None:
+                raise ScheduleDefinitionStale(
+                    "Writable Schedule no longer binds an approved document"
+                )
+            tail = connection.execute(
+                "SELECT MAX(task_index) FROM schedule_approved_tasks WHERE generation_id=?",
+                (generation_id,),
+            ).fetchone()[0]
+            next_index = len(policy.tasks) if tail is None else int(tail) + 1
+            if expected_task_index != next_index:
+                raise ScheduleDefinitionStale("Writable Schedule task append position changed")
+
+            accepted = {task.task_id: task for task in policy.tasks}
+            additions = []
+            for task in batch.tasks:
+                existing = accepted.get(task.task_id)
+                if existing is None:
+                    row = connection.execute(
+                        "SELECT task_json FROM schedule_approved_tasks WHERE generation_id=? AND task_id=?",
+                        (generation_id, task.task_id),
+                    ).fetchone()
+                    if row is not None:
+                        existing = WritableScheduleTask.model_validate_json(row["task_json"])
+                if existing is None:
+                    additions.append(task)
+                elif existing != task:
+                    raise StateConflict("Approved task ID already binds different content")
+
+            connection.executemany(
+                "INSERT INTO schedule_approved_tasks (generation_id, task_index, task_id, task_json) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    (generation_id, index, task.task_id, task.model_dump_json())
+                    for index, task in enumerate(additions, start=next_index)
+                ),
+            )
+            return len(additions)
 
     def seed_reserved(self, advance_id: str) -> bool:
         with self._database.transaction() as connection:

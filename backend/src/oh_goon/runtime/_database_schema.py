@@ -275,6 +275,20 @@ CREATE TABLE IF NOT EXISTS schedule_writable_policies (
     UNIQUE(branch_owner_subject_id, branch_ref)
 );
 
+CREATE TABLE IF NOT EXISTS schedule_approved_task_documents (
+    generation_id TEXT PRIMARY KEY REFERENCES schedule_writable_policies(generation_id) ON DELETE CASCADE,
+    document_json TEXT NOT NULL CHECK (json_valid(document_json) AND json_type(document_json) = 'object')
+);
+
+CREATE TABLE IF NOT EXISTS schedule_approved_tasks (
+    generation_id TEXT NOT NULL REFERENCES schedule_approved_task_documents(generation_id) ON DELETE CASCADE,
+    task_index INTEGER NOT NULL CHECK (task_index >= 0),
+    task_id TEXT NOT NULL,
+    task_json TEXT NOT NULL CHECK (json_valid(task_json) AND json_type(task_json) = 'object' AND json_extract(task_json, '$.task_id') IS task_id),
+    PRIMARY KEY(generation_id, task_index),
+    UNIQUE(generation_id, task_id)
+);
+
 CREATE TABLE IF NOT EXISTS schedule_executions (
     schedule_run_id TEXT PRIMARY KEY,
     schedule_id TEXT NOT NULL,
@@ -301,6 +315,12 @@ CREATE TABLE IF NOT EXISTS schedule_executions (
 );
 CREATE INDEX IF NOT EXISTS schedule_execution_order
     ON schedule_executions(schedule_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS schedule_writable_generation_order
+    ON schedule_executions(
+        schedule_id,
+        json_extract(intent_json, '$.definition_generation_id'),
+        json_extract(intent_json, '$.writable_round.task_index') DESC
+    ) WHERE json_type(intent_json, '$.writable_round.task_index') = 'integer';
 CREATE UNIQUE INDEX IF NOT EXISTS schedule_one_active_execution
     ON schedule_executions(schedule_id) WHERE status = 'RUNNING';
 

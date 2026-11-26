@@ -39,6 +39,7 @@ from oh_goon.services.fleet_plan_candidate import (
 )
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.repositories import RepositoryService
+from oh_goon.services.schedule_task_documents import bind_task_document
 
 if TYPE_CHECKING:
     from oh_goon.services.fleet_plans import FleetPlanService
@@ -75,6 +76,26 @@ class WritableScheduleRounds:
         if receipt is None or receipt.published_at is None:
             raise StateConflict("Writable Schedule requires an original published branch advance")
         return receipt
+
+    def bind_approved_task_document(
+        self, schedule_id: str, *, expected_generation_id: str, path: Path
+    ) -> ScheduleDefinition:
+        definition = self._definitions.get(schedule_id)
+        if definition.generation_id != expected_generation_id:
+            raise ScheduleExecutionStale("Writable Schedule generation changed")
+        policy = self._definitions.writable_policy(definition.generation_id)
+        if policy is None:
+            raise FleetPlanInvalid("Approved task documents require a writable Schedule")
+        prepared = self._published(policy.seed_advance_id).preparation
+        selected = self._selection(prepared.repository_path)
+        if selected is None or writable_native_selection_id(selected) != policy.native_selection_id:
+            raise ScheduleExecutionStale("Writable Schedule requires its selected native runtime")
+        document = bind_task_document(
+            path, protected_roots=(prepared.repository_path, prepared.branch_owner_path)
+        )
+        return self._definitions.bind_approved_task_document(
+            schedule_id, expected_generation_id=expected_generation_id, document=document
+        )
 
     def create(
         self,

@@ -11,7 +11,12 @@ from typing import TypedDict
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from oh_goon.core.errors import ScheduleExecutionStale, StateConflict
+from oh_goon.core.errors import (
+    RuntimeSafetyStale,
+    ScheduleDefinitionStale,
+    ScheduleExecutionStale,
+    StateConflict,
+)
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -50,6 +55,8 @@ from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.models.workspace import CandidateCheckpoint, WorkspaceRef
 from oh_goon.core.models.writable_schedule import (
+    ApprovedTaskBatch,
+    ApprovedTaskDocument,
     ScheduledWritableRound,
     WritableSchedulePolicy,
     WritableScheduleTask,
@@ -414,6 +421,171 @@ def test_writable_policy_reserves_a_published_seed_until_the_definition_is_remov
     assert reopened.writable_policy(paused.generation_id) is None
     recreated = reopened.create("writable", request, writable_policy=policy)
     assert recreated.generation_id != paused.generation_id
+
+
+def test_approved_document_is_bound_to_one_writable_schedule_generation(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state" / "app.db")
+    prepared = _published_seed(database, tmp_path)
+    definitions = ScheduleDefinitionStore(database)
+    request = schedule_create(repository_ids=(prepared.repository_id,))
+    ordinary = definitions.create("ordinary", request)
+    writable = definitions.create("writable", request, writable_policy=_writable_policy(prepared))
+    directory = tmp_path.stat()
+    document = ApprovedTaskDocument(
+        path=tmp_path / "approved.json",
+        directory_device=directory.st_dev,
+        directory_inode=directory.st_ino,
+    )
+
+    with pytest.raises(StateConflict, match="require a writable Schedule"):
+        definitions.bind_approved_task_document(
+            ordinary.schedule_id, expected_generation_id=ordinary.generation_id, document=document
+        )
+    with pytest.raises(ScheduleDefinitionStale, match="current Schedule"):
+        definitions.bind_approved_task_document(
+            writable.schedule_id, expected_generation_id=ordinary.generation_id, document=document
+        )
+
+    assert (
+        definitions.bind_approved_task_document(
+            writable.schedule_id, expected_generation_id=writable.generation_id, document=document
+        )
+        == writable
+    )
+    replay_revision = database.durable_revision()
+    reopened_database = LocalDatabase(database.path)
+    reopened = ScheduleDefinitionStore(reopened_database)
+    assert (
+        reopened.bind_approved_task_document(
+            writable.schedule_id, expected_generation_id=writable.generation_id, document=document
+        )
+        == writable
+    )
+    assert reopened_database.durable_revision() == replay_revision
+    with pytest.raises(StateConflict, match="another approved document"):
+        reopened.bind_approved_task_document(
+            writable.schedule_id,
+            expected_generation_id=writable.generation_id,
+            document=document.model_copy(update={"directory_inode": directory.st_ino + 1}),
+        )
+
+    with reopened_database.transaction() as connection:
+        assert reopened.approved_task_document_in(connection, writable.generation_id) == document
+        assert reopened.approved_task_document_in(connection, ordinary.generation_id) is None
+    reopened.delete(
+        writable.schedule_id,
+        ScheduleDeleteRequest(
+            generation_id=writable.generation_id, record_version=writable.record_version
+        ),
+    )
+    with reopened_database.transaction() as connection:
+        assert reopened.approved_task_document_in(connection, writable.generation_id) is None
+
+
+def test_approved_task_append_is_ordered_revision_fenced_and_atomic(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state" / "app.db")
+    prepared = _published_seed(database, tmp_path)
+    policy = _writable_policy(prepared)
+    request = schedule_create(repository_ids=(prepared.repository_id,))
+    definitions = ScheduleDefinitionStore(database)
+    definition = definitions.create("writable", request, writable_policy=policy)
+    generation = definition.generation_id
+    extras = tuple(
+        WritableScheduleTask(task_id=f"task-{index}", prompt=f"Approved task {index}.")
+        for index in range(32)
+    )
+    with pytest.raises(ValidationError, match="task IDs must be unique"):
+        ApprovedTaskBatch(tasks=(extras[0], extras[0]))
+    with pytest.raises(ValidationError, match="at most 32"):
+        ApprovedTaskBatch(tasks=(*extras, policy.tasks[0]))
+    with pytest.raises(ScheduleDefinitionStale, match="no longer binds"):
+        definitions.append_approved_tasks(
+            generation,
+            expected_task_index=2,
+            expected_durable_revision=database.durable_revision(),
+            tasks=extras,
+        )
+
+    directory = tmp_path.stat()
+    definitions.bind_approved_task_document(
+        definition.schedule_id,
+        expected_generation_id=generation,
+        document=ApprovedTaskDocument(
+            path=tmp_path / "approved.json",
+            directory_device=directory.st_dev,
+            directory_inode=directory.st_ino,
+        ),
+    )
+    initial_revision = database.durable_revision()
+    assert (
+        definitions.append_approved_tasks(
+            generation,
+            expected_task_index=2,
+            expected_durable_revision=initial_revision,
+            tasks=extras,
+        )
+        == 32
+    )
+
+    reopened_database = LocalDatabase(database.path)
+    reopened = ScheduleDefinitionStore(reopened_database)
+    current_revision = reopened_database.durable_revision()
+    assert reopened.create("writable", request, writable_policy=policy) == definition
+    with pytest.raises(RuntimeSafetyStale):
+        reopened.append_approved_tasks(
+            generation, expected_task_index=34, expected_durable_revision=initial_revision, tasks=()
+        )
+    with pytest.raises(ScheduleDefinitionStale, match="append position changed"):
+        reopened.append_approved_tasks(
+            generation,
+            expected_task_index=2,
+            expected_durable_revision=current_revision,
+            tasks=extras,
+        )
+    assert (
+        reopened.append_approved_tasks(
+            generation,
+            expected_task_index=34,
+            expected_durable_revision=current_revision,
+            tasks=extras,
+        )
+        == 0
+    )
+    assert (
+        reopened.append_approved_tasks(
+            generation, expected_task_index=34, expected_durable_revision=current_revision, tasks=()
+        )
+        == 0
+    )
+
+    next_task = WritableScheduleTask(task_id="next", prompt="Later approved task.")
+    for prior in (policy.tasks[0], extras[-1]):
+        conflicting = WritableScheduleTask(task_id=prior.task_id, prompt="Different task.")
+        with pytest.raises(StateConflict, match="different content"):
+            reopened.append_approved_tasks(
+                generation,
+                expected_task_index=34,
+                expected_durable_revision=current_revision,
+                tasks=(next_task, conflicting),
+            )
+    assert reopened_database.durable_revision() == current_revision
+    with reopened_database.transaction() as connection:
+        assert reopened.writable_task_in(connection, generation, policy, 34) is None
+    assert (
+        reopened.append_approved_tasks(
+            generation,
+            expected_task_index=34,
+            expected_durable_revision=current_revision,
+            tasks=(policy.tasks[0], next_task, extras[-1]),
+        )
+        == 1
+    )
+
+    with reopened_database.transaction() as connection:
+        assert tuple(
+            reopened.writable_task_in(connection, generation, policy, index) for index in range(35)
+        ) == (*policy.tasks, *extras, next_task)
+        assert reopened.writable_task_in(connection, generation, policy, 35) is None
 
 
 def test_writable_policy_reserves_the_same_branch_across_owner_identity_changes(

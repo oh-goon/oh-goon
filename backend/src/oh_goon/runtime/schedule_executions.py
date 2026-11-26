@@ -358,8 +358,10 @@ def _require_writable_selection_in(
     )
     if (
         policy is None
-        or selected.task_index >= len(policy.tasks)
-        or selected.task != policy.tasks[selected.task_index]
+        or selected.task
+        != ScheduleDefinitionStore.writable_task_in(
+            connection, current.intent.definition_generation_id, policy, selected.task_index
+        )
         or selected.native_selection_id != policy.native_selection_id
     ):
         raise ScheduleExecutionStale("Writable occurrence task differs from its authored policy")

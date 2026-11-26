@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from oh_goon.core.capability_registry import resolve_capability_intent
-from oh_goon.core.errors import CapabilityUnavailable, InvalidRequest
+from oh_goon.core.errors import (
+    CapabilityUnavailable,
+    InvalidRequest,
+    RuntimeSafetyStale,
+    ScheduleDefinitionStale,
+    StateConflict,
+)
 from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     requested_fleet_repository_scope,
@@ -16,7 +22,6 @@ from oh_goon.core.models.schedule_execution import (
 )
 from oh_goon.core.models.writable_schedule import (
     ScheduledWritableRound,
-    WritableSchedulePolicy,
     writable_schedule_advance_id,
     writable_schedule_run_id,
 )
@@ -26,6 +31,7 @@ from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.invariant_auditor import SystemInvariantAuditor
 from oh_goon.services.runtime_safety import RuntimeSafetyService
+from oh_goon.services.schedule_task_documents import ApprovedTaskDocumentError, read_approved_tasks
 from oh_goon.services.schedule_timing import ScheduleTimingDecision, schedule_timing_decision
 
 
@@ -66,6 +72,9 @@ class ScheduleAdmissionPlanner:
     def plan_scheduled(
         self, schedule_id: str
     ) -> tuple[ScheduleAdmissionPlan, ScheduleTimingDecision] | None:
+        writable = None
+        document = None
+        index = None
         with self._database.transaction() as connection:
             cut = self._auditor.read_cut_in(connection)
             definition = self._definitions.get_in(connection, schedule_id)
@@ -78,47 +87,73 @@ class ScheduleAdmissionPlanner:
                 )
             )
             decision = schedule_timing_decision(definition, latest)
-        if not decision.due:
-            return None
-        writable = None
-        if policy is not None:
-            writable = next_writable_round(policy, latest, definition.generation_id)
-            if writable is None:
+            if not decision.due:
                 return None
+            if policy is not None:
+                index = next_writable_task_index(latest, definition.generation_id)
+                if index is None:
+                    return None
+                task = self._definitions.writable_task_in(
+                    connection, definition.generation_id, policy, index
+                )
+                if task is None:
+                    document = self._definitions.approved_task_document_in(
+                        connection, definition.generation_id
+                    )
+                    if document is None:
+                        return None
+                else:
+                    writable = ScheduledWritableRound(
+                        task_index=index,
+                        task=task,
+                        advance_id=(
+                            policy.seed_advance_id
+                            if index == 0
+                            else writable_schedule_advance_id(
+                                writable_schedule_run_id(definition.generation_id, index)
+                            )
+                        ),
+                        predecessor_run_id=latest.repository_runs[0].fleet_run_id
+                        if latest
+                        else None,
+                        native_selection_id=policy.native_selection_id,
+                    )
         admitted = self._runtime_safety.admit_cut(cut)
+        if document is not None:
+            assert index is not None
+            tasks = read_approved_tasks(document)
+            if tasks:
+                try:
+                    self._definitions.append_approved_tasks(
+                        definition.generation_id,
+                        expected_task_index=index,
+                        expected_durable_revision=admitted.durable_revision,
+                        tasks=tasks,
+                    )
+                except (RuntimeSafetyStale, ScheduleDefinitionStale):
+                    raise
+                except StateConflict as exc:
+                    raise ApprovedTaskDocumentError(str(exc)) from None
+            # The refill changes durable authority. The next ordinary tick admits its task.
+            return None
         return _admission_plan(definition, admitted.durable_revision, writable), decision
 
 
-def next_writable_round(
-    policy: WritableSchedulePolicy, previous: ScheduleRunRecord | None, generation_id: str
-) -> ScheduledWritableRound | None:
-    """Select exactly one approved task from the original Schedule history."""
-    index = 0
-    predecessor = None
-    advance_id = policy.seed_advance_id
-    if previous is not None:
-        last_round = previous.intent.writable_round
-        if (
-            last_round is None
-            or previous.intent.definition_generation_id != generation_id
-            or not isinstance(previous, CompletedScheduleRun)
-            or len(previous.repository_runs) != 1
-            or previous.repository_runs[0].status is not ScheduleRepositoryRunStatus.SUCCESSFUL
-        ):
-            return None
-        predecessor = previous.repository_runs[0].fleet_run_id
-        assert predecessor is not None
-        index = last_round.task_index + 1
-        advance_id = writable_schedule_advance_id(writable_schedule_run_id(generation_id, index))
-    if index >= len(policy.tasks):
+def next_writable_task_index(previous: ScheduleRunRecord | None, generation_id: str) -> int | None:
+    """Select the next ordinal only after the original predecessor succeeded."""
+    if previous is None:
+        return 0
+    last_round = previous.intent.writable_round
+    if (
+        last_round is None
+        or previous.intent.definition_generation_id != generation_id
+        or not isinstance(previous, CompletedScheduleRun)
+        or len(previous.repository_runs) != 1
+        or previous.repository_runs[0].status is not ScheduleRepositoryRunStatus.SUCCESSFUL
+    ):
         return None
-    return ScheduledWritableRound(
-        task_index=index,
-        task=policy.tasks[index],
-        advance_id=advance_id,
-        predecessor_run_id=predecessor,
-        native_selection_id=policy.native_selection_id,
-    )
+    assert previous.repository_runs[0].fleet_run_id is not None
+    return last_round.task_index + 1
 
 
 def _admission_plan(

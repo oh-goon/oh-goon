@@ -178,8 +178,50 @@ restart recovers the same pending publication or observes the same admitted Run.
 Resume with the same scoped native runtime. While paused, the Schedule starts
 no new writable Run. An already admitted child settles through Fleet. A
 failed or unverified predecessor stops progression. The last task's verified
-candidate remains available for explicit branch advancement after the list ends.
+candidate remains available for explicit branch advancement if the Schedule has
+no additional approved work.
 [Local writable round setup](AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
+
+### Refill a writable Schedule from approved task docs
+
+Bind one operator-controlled JSON document to the existing writable Schedule
+through the authenticated local API. The generation ID comes from that Schedule
+definition. Choose an absolute path outside its receiving checkout and bare
+branch owner.
+
+```http
+PUT /api/schedules/agent-branch/approved-task-document
+Content-Type: application/json
+X-Oh-Goon-Local-Access: <local-access-token>
+
+{"expected_generation_id":"<generation-id>","path":"/absolute/approved-tasks.json"}
+```
+
+Treat publication to that path as operator approval. Restrict write access to
+the people allowed to approve writable work. Keep raw shared notes separately
+and include selected, attributed excerpts in the approved prompts. Publish the
+whole UTF-8 file by writing a temporary file in the same directory and renaming
+it into place.
+
+```json
+{
+  "tasks": [
+    {"task_id": "follow-up", "prompt": "Apply the approved follow-up using the selected task note."}
+  ]
+}
+```
+
+A publication can contain up to 32 ordered tasks and be at most 2 MiB. After
+the current list is exhausted and the next interval is due, the Schedule
+captures the new tasks into private local state. The following ordinary tick
+can admit the first captured task. A missing file, empty list, or an unchanged
+publication leaves an exhausted Schedule waiting. A repeated ID with identical
+task content is skipped. Reusing an ID for different content refuses that
+publication. Use a new ID for a newly approved task.
+
+Captured tasks remain ordered and immutable through restart. Each writable
+round starts a fresh Pi session from the published verified commit. A paused
+Schedule or unsuccessful predecessor prevents the next refill and Run.
 
 ### Move scheduled writable work to another host
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from oh_goon.core.models.branch_advance import BranchAdvanceId
@@ -27,6 +29,13 @@ class WritableScheduleCreateRequest(BaseModel):
     tasks: WritableScheduleTasks
     name: str | None = Field(default=None, min_length=1, max_length=80)
     interval_minutes: int = Field(ge=1, le=10080)
+
+
+class ApprovedTaskDocumentBindRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_generation_id: str = Field(min_length=1)
+    path: Path
 
 
 class SharedPlanScheduleCreateRequest(BaseModel):

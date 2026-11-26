@@ -6,6 +6,7 @@ from oh_goon.api.dependencies import (
     shared_plan_schedule_service,
 )
 from oh_goon.api.schemas.schedule import (
+    ApprovedTaskDocumentBindRequest,
     RetainedReviewScheduleCreateRequest,
     ScheduleRunRequest,
     SharedPlanScheduleCreateRequest,
@@ -94,6 +95,23 @@ def create_from_branch_advance(
         tasks=request.tasks,
         name=request.name,
         interval_minutes=request.interval_minutes,
+    )
+
+
+@router.put(
+    "/{schedule_id}/approved-task-document",
+    response_model=ScheduleDefinition,
+    operation_id="bind_approved_task_document",
+)
+def bind_approved_task_document(
+    schedule_id: str,
+    request: ApprovedTaskDocumentBindRequest,
+    service: ScheduleService = Depends(schedule_service),
+) -> ScheduleDefinition:
+    return service.bind_approved_task_document(
+        schedule_id,
+        expected_generation_id=request.expected_generation_id,
+        path=request.path,
     )
 
 
