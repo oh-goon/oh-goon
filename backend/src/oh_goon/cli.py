@@ -147,9 +147,68 @@ def _run_pre_runtime_command(args: argparse.Namespace) -> int | None:
     return None
 
 
+def _scheduled_agent_serve_selection(
+    args: argparse.Namespace,
+) -> tuple[ProcessIsolationBackend, GitService] | None:
+    from oh_goon.cli_result import CliUsageRejected
+    from oh_goon.core.errors import FleetPlanInvalid
+
+    workspace = args.scheduled_agent_workspace
+    profile = args.scheduled_agent_profile
+    catalog = args.scheduled_agent_catalog
+    if workspace is None and profile is None and catalog is None:
+        return None
+    if workspace is None or profile is None or catalog is None:
+        raise CliUsageRejected(
+            "SCHEDULED_AGENT_SELECTION_REQUIRED",
+            "Pass --scheduled-agent-workspace, --scheduled-agent-profile and --scheduled-agent-catalog together.",
+        )
+
+    from oh_goon.cli_ai import resolve_native_cli_selection
+    from oh_goon.core.models.agent_providers import PiSessionIntent
+    from oh_goon.integrations.agent_provider_client import require_provider_key_file_separation
+    from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
+    workspace = workspace.expanduser().resolve(strict=True)
+    catalog = catalog.expanduser().resolve(strict=True)
+    if not workspace.is_dir() or not catalog.is_file():
+        raise FleetPlanInvalid(
+            "Scheduled Agent serve requires an existing Git root and catalog file"
+        )
+    session = PiSessionIntent(mode="ephemeral")
+    selected, isolation, git = resolve_native_cli_selection(
+        agent="pi",
+        profile=profile,
+        workspace=workspace,
+        config_file=catalog,
+        session=session,
+        role="review",
+    )
+    if (
+        not isinstance(isolation, BubblewrapProcessIsolation)
+        or selected.agent != "pi"
+        or selected.interactive
+        or selected.connection is None
+        or selected.profile.backend != "bubblewrap"
+        or selected.session != session
+    ):
+        raise FleetPlanInvalid(
+            "Scheduled Agent serve requires an ephemeral managed Pi Bubblewrap profile"
+        )
+    require_provider_key_file_separation(selected.connection, (workspace,))
+    return isolation, git
+
+
 def _run_serve_command(args: argparse.Namespace) -> int:
     from oh_goon.api.local_access import ensure_local_access_token
 
+    try:
+        scheduled = _scheduled_agent_serve_selection(args)
+    except (FleetDomainError, OSError, ValueError) as exc:
+        from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+        print_safe_plan_diagnostic(exc, as_json=False)
+        return 2
     if check_local_state_for_startup() != 0:
         return 2
     token = ensure_local_access_token()
@@ -158,7 +217,33 @@ def _run_serve_command(args: argparse.Namespace) -> int:
     print("Send it as X-Oh-Goon-Local-Access on API requests.")
     import uvicorn
 
-    uvicorn.run("oh_goon.api.app:app", host=args.host, port=args.port, reload=False)
+    if scheduled is None:
+        uvicorn.run("oh_goon.api.app:app", host=args.host, port=args.port, reload=False)
+        return 0
+
+    from oh_goon.api.app import create_app
+    from oh_goon.api.dependencies import bind_application_startup
+
+    isolation, git = scheduled
+
+    def build() -> ApplicationRuntime:
+        try:
+            runtime = _build_application_runtime(
+                standard_local=True, standard_process_isolation=isolation, native_git_service=git
+            )
+        except (FleetDomainError, OSError, ValueError) as exc:
+            from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+            print_safe_plan_diagnostic(exc, as_json=False)
+            raise RuntimeError("The selected scheduled Agent runtime did not initialize") from None
+        if runtime is None:
+            raise RuntimeError("The selected scheduled Agent runtime did not initialize")
+        return runtime
+
+    with bind_application_startup(build):
+        uvicorn.run(
+            create_app(local_access_token=token), host=args.host, port=args.port, reload=False
+        )
     return 0
 
 
@@ -168,6 +253,7 @@ def _build_application_runtime(
     standard_local: bool | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
     git_service: GitService | None = None,
+    native_git_service: GitService | None = None,
     startup_purpose: RuntimeStartupPurpose = "application",
     as_json: bool = False,
     readback_id: str | None = None,
@@ -192,6 +278,13 @@ def _build_application_runtime(
                 standard_process_isolation=standard_process_isolation,
                 git_service=git_service,
                 startup_purpose="workflow",
+            )
+        if native_git_service is not None:
+            return ApplicationRuntime.build(
+                standard_local=standard_local,
+                standard_process_isolation=standard_process_isolation,
+                git_service=git_service,
+                native_git_service=native_git_service,
             )
         if git_service is not None:
             return ApplicationRuntime.build(
@@ -660,6 +753,9 @@ def _main(
         "parallel-work",
         "cancel-parallel",
         "parallel-notes",
+        "advance-candidate",
+        "branch-advance",
+        "start-round",
     }:
         from oh_goon.cli_parallel_agents import run_parallel_agent_command
 

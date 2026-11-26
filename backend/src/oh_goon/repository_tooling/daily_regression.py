@@ -24,18 +24,27 @@ from oh_goon.repository_tooling.pytest_execution_report import execution_report_
 
 SCHEMA = "oh-goon.daily-regression/v1"
 MAX_JSON_BYTES = 64 * 1024 * 1024
-_TITLE = re.compile(r"^daily-full \| (scheduled|\d{4}-\d{2}-\d{2}) \| ([0-9a-f]{40})$")
+_SLOT_TIME = time(2, 23)
+_SLOT_WEEKDAYS = (1, 4, 6)  # datetime.weekday(): Tuesday, Friday, Sunday
+_SLOT_GRACE = timedelta(hours=12)
+_TITLE = re.compile(r"^daily-full \| (scheduled|latest-slot|\d{4}-\d{2}-\d{2}) \| ([0-9a-f]{40})$")
 
 
-def daily_slot(now: datetime) -> str:
-    """Most recent 02:23 UTC slot, including before today's scheduled time."""
+def _calendar_slot_day(now: datetime) -> date:
     if now.tzinfo is None:
         raise ValueError("daily slot requires an explicit timezone")
     current = now.astimezone(UTC)
     day = current.date()
-    if current.timetz().replace(tzinfo=None) < time(2, 23):
+    if current.time() < _SLOT_TIME:
         day -= timedelta(days=1)
-    return day.isoformat()
+    return day
+
+
+def daily_slot(now: datetime) -> str:
+    """Most recent Tuesday, Friday, or Sunday 02:23 UTC slot."""
+    day = _calendar_slot_day(now)
+    days_since_slot = min((day.weekday() - weekday) % 7 for weekday in _SLOT_WEEKDAYS)
+    return (day - timedelta(days=days_since_slot)).isoformat()
 
 
 def _instant(value: str) -> datetime:
@@ -203,6 +212,9 @@ def _daily_identity(run: dict[str, Any]) -> tuple[str, str] | None:
         return None
     selected_slot, sha = match.groups()
     if selected_slot == "scheduled":
+        # Historical runs and explicit source overrides keep their original slot.
+        selected_slot = _calendar_slot_day(_instant(str(run["created_at"]))).isoformat()
+    elif selected_slot == "latest-slot":
         selected_slot = daily_slot(_instant(str(run["created_at"])))
     return _slot(selected_slot), _sha(sha)
 
@@ -537,9 +549,12 @@ def health_summary(
         for row in daily
         if (identity := _daily_identity(row)) is not None and identity[0] == expected_slot
     ]
-    stale = complete is None or now.astimezone(UTC) - _instant(
-        complete["completed_at"]
-    ) > timedelta(hours=36)
+    freshness_slot = daily_slot(now.astimezone(UTC) - _SLOT_GRACE)
+    stale = not any(
+        freshness_slot <= result["slot"] <= expected_slot
+        and date.fromisoformat(result["slot"]).weekday() in _SLOT_WEEKDAYS
+        for result in admitted
+    )
     overdue = [
         row["id"]
         for row in daily
@@ -662,9 +677,15 @@ def main(argv: list[str] | None = None) -> int:
                 if not isinstance(current, dict) or current.get("id") != args.run_id:
                     raise ValueError("current immutable Actions run metadata is unavailable")
                 rows.append(current)
-            slot = (
-                _slot(args.slot) if args.slot else daily_slot(_instant(str(current["created_at"])))
-            )
+            if args.slot:
+                slot = _slot(args.slot)
+            elif args.mode == "daily":
+                current_identity = _daily_identity(current)
+                if current_identity is None:
+                    raise ValueError("current daily campaign slot identity is unavailable")
+                slot = current_identity[0]
+            else:
+                slot = _calendar_slot_day(_instant(str(current["created_at"]))).isoformat()
             previous = (
                 existing_slot_attempt(rows, slot, current_run_id=args.run_id)
                 if args.mode == "daily"

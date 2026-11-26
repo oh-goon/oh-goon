@@ -6,11 +6,27 @@ from types import SimpleNamespace
 import pytest
 
 from oh_goon.core.errors import ExecutionBusy
-from oh_goon.core.models.schedule import ScheduleDefinition
-from oh_goon.core.models.schedule_execution import CompletedScheduleRun
+from oh_goon.core.models.branch_advance import branch_round_run_id
+from oh_goon.core.models.schedule import ScheduleDefinition, ScheduleOccurrenceRepositoryRun
+from oh_goon.core.models.schedule_execution import (
+    CompletedScheduleRun,
+    ScheduleRunRecord,
+    parse_schedule_run,
+)
+from oh_goon.core.models.writable_schedule import (
+    ScheduledWritableRound,
+    WritableSchedulePolicy,
+    WritableScheduleTask,
+    writable_schedule_advance_id,
+    writable_schedule_run_id,
+)
 from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import ScheduleExecutionStatus, ScheduleState
-from oh_goon.services.schedule_admission import ScheduleAdmissionPlan
+from oh_goon.core.vocabulary import (
+    ScheduleExecutionStatus,
+    ScheduleRepositoryRunStatus,
+    ScheduleState,
+)
+from oh_goon.services.schedule_admission import ScheduleAdmissionPlan, next_writable_round
 from oh_goon.services.schedule_timing import ScheduleTimingDecision, schedule_timing_decision
 from oh_goon.services.schedules import ScheduleService
 from tests.factories.schedules import (
@@ -135,6 +151,57 @@ def test_missed_intervals_keep_the_original_due_anchor(has_terminal: bool) -> No
 
     assert decision.due
     assert decision.due_at == due_at
+
+
+def test_writable_selection_keeps_authored_order_and_stops_on_failure_or_exhaustion() -> None:
+    definition = _definition(interval=2)
+    generation = definition.generation_id
+    tasks = (
+        WritableScheduleTask(task_id="z-first", prompt="Inspect the first change."),
+        WritableScheduleTask(task_id="a-second", prompt="Inspect the second change."),
+    )
+    policy = WritableSchedulePolicy(
+        seed_advance_id="published-seed", tasks=tasks, native_selection_id="selected-runtime"
+    )
+    seed = next_writable_round(policy, None, generation)
+    assert seed is not None
+    assert seed.task == tasks[0] and seed.advance_id == policy.seed_advance_id
+    assert seed.predecessor_run_id is None
+
+    def observed(selected: ScheduledWritableRound, success: bool) -> ScheduleRunRecord:
+        now = utc_now()
+        row = ScheduleOccurrenceRepositoryRun(
+            repository_id=definition.repository_ids[0],
+            fleet_run_id=branch_round_run_id(selected.advance_id),
+            status=ScheduleRepositoryRunStatus.SUCCESSFUL
+            if success
+            else ScheduleRepositoryRunStatus.CANCELLED,
+        )
+        return parse_schedule_run(
+            {
+                "schedule_run_id": writable_schedule_run_id(generation, selected.task_index),
+                "schedule_id": definition.schedule_id,
+                "intent": scheduled_fleet_run_intent(definition).model_copy(
+                    update={"writable_round": selected}
+                ),
+                "repository_runs": (row,),
+                "status": ScheduleExecutionStatus.COMPLETED
+                if success
+                else ScheduleExecutionStatus.CANCELLED,
+                "started_at": now,
+                "finished_at": now,
+            }
+        )
+
+    successor = next_writable_round(policy, observed(seed, True), generation)
+    assert successor is not None
+    assert successor.task == tasks[1] and successor.task_index == 1
+    assert successor.predecessor_run_id == branch_round_run_id(seed.advance_id)
+    assert successor.advance_id == writable_schedule_advance_id(
+        writable_schedule_run_id(generation, 1)
+    )
+    assert next_writable_round(policy, observed(successor, True), generation) is None
+    assert next_writable_round(policy, observed(seed, False), generation) is None
 
 
 def _scheduled_admission(

@@ -65,7 +65,8 @@ uv run --offline --frozen --no-sync ruff check src tests
 
 Before submitting backend work, use `make -C .. check` for affected fast proof
 and applicable static/boundary checks. Complete backend/integration portfolios
-run daily; a specific critical regression may require a named additional proof.
+run on the full regression schedule; a specific critical regression may require
+a named additional proof.
 Use architecture when its governed boundary changed. Do not make the complete
 backend gate a per-edit or per-PR prerequisite.
 

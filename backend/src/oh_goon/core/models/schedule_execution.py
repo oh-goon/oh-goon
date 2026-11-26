@@ -10,6 +10,11 @@ from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope
 from oh_goon.core.models.schedule import ScheduleFailure, ScheduleOccurrenceRepositoryRun
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.writable_schedule import (
+    ScheduledWritableRound,
+    writable_schedule_advance_id,
+    writable_schedule_run_id,
+)
 from oh_goon.core.vocabulary import (
     OperationAction,
     ScheduleExecutionStatus,
@@ -26,6 +31,9 @@ class ScheduledFleetRunIntent(ImmutableModel):
     target: FleetPlanTarget
     repository_scope: ExplicitRepositoryScope
     repository_instance_ids: dict[str, str]
+    writable_round: ScheduledWritableRound | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_intent(self) -> ScheduledFleetRunIntent:
@@ -37,6 +45,8 @@ class ScheduledFleetRunIntent(ImmutableModel):
             raise ValueError("Schedule execution must bind at least one repository")
         if set(self.repository_instance_ids) != set(self.repository_scope.repository_ids):
             raise ValueError("Schedule repository instance authority must exactly match scope")
+        if self.writable_round is not None and len(self.repository_scope.repository_ids) != 1:
+            raise ValueError("A writable Schedule occurrence requires exactly one repository")
         return self
 
 
@@ -78,6 +88,16 @@ class _ScheduleRunRecordBase(ImmutableModel):
             raise ValueError("Completed Schedule executions cannot retain attention observations")
         if self.status is ScheduleExecutionStatus.ATTENTION_REQUIRED and not self.attention:
             raise ValueError("Attention-required Schedule executions need exact attention evidence")
+        selected = self.intent.writable_round
+        if selected is not None:
+            if self.schedule_run_id != writable_schedule_run_id(
+                self.intent.definition_generation_id, selected.task_index
+            ):
+                raise ValueError("Writable occurrence identity differs from its selected task")
+            if selected.task_index > 0 and selected.advance_id != writable_schedule_advance_id(
+                self.schedule_run_id
+            ):
+                raise ValueError("Writable occurrence differs from its selected branch advance")
         return self
 
     @property

@@ -39,6 +39,7 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
+    FleetRunEventBatch,
     PiSessionRetiredEvent,
     PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
@@ -73,6 +74,7 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
+from oh_goon.runtime.execution.sqlite_lease import ExecutionCustody
 from oh_goon.runtime.journal import Journal
 from tests.fakes.native_protocol import observe_native_protocol
 from tests.integration.services.test_native_pi_session_protocol import _PiProbe, _state
@@ -119,7 +121,7 @@ def _provider(
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
     initial_tool_command: str | None = None,
-    held_reply: str | None = None,
+    held_reply: tuple[str, Literal["stop", "error"]] | None = None,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -137,7 +139,8 @@ def _provider(
                     if not reply_after_hold:
                         return
                     if held_reply is not None:
-                        response = {"role": "assistant", "content": held_reply}, "stop"
+                        content, finish = held_reply
+                        response = {"role": "assistant", "content": content}, finish
                 self.reply(*response)
             except Exception as error:
                 errors.append(str(error))
@@ -1018,7 +1021,7 @@ def _held_pi_journey(
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
     initial_tool_command: str | None = None,
-    held_reply: str | None = None,
+    held_reply: tuple[str, Literal["stop", "error"]] | None = None,
     timeout_seconds: int = 90,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
@@ -1154,22 +1157,214 @@ await import(pathToFileURL(entry).href);
             release_held_inference.set()
 
 
+def _original_pi_writer(
+    database_path: Path, controller_pid: int
+) -> tuple[ExecutionCustody, FleetRunEventBatch, PiSessionWriterReservedEvent, ProcessStartedEvent]:
+    database = LocalDatabase(database_path, read_only=True)
+    lease = ExecutionCoordinator(database).active_lease()
+    assert lease is not None and lease.fleet_run_id and lease.custody is not None
+    custody = lease.custody
+    assert custody.phase == "WORKER_OWNED"
+    assert custody.owner_pid not in {os.getpid(), controller_pid}
+    journal = Journal(database)
+    live = journal.run_events(lease.fleet_run_id)
+    assert live.run.status is FleetRunStatus.RUNNING
+    assert journal.inspect_pi_session(lease.fleet_run_id).availability == "busy"
+    (reservation,) = (
+        event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
+    )
+    assert reservation.continuation is None
+    (started,) = (
+        event
+        for event in live.events
+        if type(event) is ProcessStartedEvent
+        and event.step_id == reservation.step_id
+        and event.sequence > reservation.sequence
+    )
+    assert reservation.attempt_sequence < reservation.sequence < started.sequence
+    assert not any(
+        isinstance(event, (PiSessionWriterObservedEvent, StepSucceededEvent))
+        for event in live.events
+    )
+    return custody, live, reservation, started
+
+
+def _native_session_bytes(path: Path) -> tuple[os.stat_result, bytes]:
+    with path.open("rb") as stream:
+        file = os.fstat(stream.fileno())
+        assert 0 < file.st_size < 1024 * 1024
+        transcript = stream.read(file.st_size + 1)
+    assert len(transcript) == file.st_size
+    return file, transcript
+
+
+def _native_session_messages(transcript: bytes) -> list[dict[str, Any]]:
+    return [
+        entry["message"]
+        for entry in map(json.loads, transcript.splitlines())
+        if entry["type"] == "message"
+    ]
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("during_tool", [False, True], ids=["after-tool", "during-tool"])
+def test_installed_pi_first_user_append_survives_provider_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(
+        tmp_path,
+        monkeypatch,
+        hold_request_number=1,
+        reply_after_hold=True,
+        held_reply=("", "error"),
+    ) as journey:
+        with subprocess.Popen(
+            (*journey.ai, "--prompt", _TASKS[0], "--session", "new"),
+            cwd=journey.repository,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ) as controller:
+            try:
+                assert journey.held_inference_arrived.wait(65), journey.errors
+                _, live, reservation, started = _original_pi_writer(
+                    journey.database_path, controller.pid
+                )
+                session_root = ApplicationStatePathLayout.from_database(
+                    journey.database_path
+                ).pi_sessions
+                slot = session_root / reservation.storage_id
+                native_file = slot / PI_SESSION_NEW_FILE.name
+                before, first_append = _native_session_bytes(native_file)
+                system, user = _native_session_messages(first_append)
+                assert system["role"] == "system"
+                assert user["role"] == "user" and _TASKS[0] in _message_text(user)
+                assert journey.requests == [_TASKS[0]] and not journey.errors
+
+                journey.release_held_inference.set()
+                stdout, stderr = controller.communicate(timeout=65)
+                assert controller.returncode == 1, (stdout[-3000:], stderr[-3000:])
+            finally:
+                journey.release_held_inference.set()
+                if controller.poll() is None:
+                    controller.kill()
+
+        run_id = live.run.fleet_run_id
+        assert json.loads(stdout)["fleet_run_id"] == run_id
+        journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+        finished = journal.run_events(run_id)
+        assert finished.events[: len(live.events)] == live.events
+        detail = journal.read_view().required_run_detail(run_id)
+        assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+        agent, verifier = detail.game_tape.repositories[0].steps
+        assert agent.settlement.outcome == "FAILED" and agent.settlement.cleanup == "VERIFIED"
+        assert agent.settlement.observed_returncode == 0
+        assert not verifier.attempts and verifier.settlement.reason == "NOT_STARTED"
+        operation = detail.operations[0].evidence
+        assert isinstance(operation, FleetPlanOperationEvidence)
+        (native,) = (
+            item
+            for item in operation.plan.steps[0].observations
+            if isinstance(item, NativeAgentObservation)
+        )
+        assert native.settled and native.failed
+
+        (receipt,) = (
+            event for event in finished.events if isinstance(event, PiSessionWriterObservedEvent)
+        )
+        exited, quiescent = (
+            event
+            for event in finished.events
+            if isinstance(event, (ProcessExitedEvent, DescendantsQuiescentEvent))
+            and event.physical_execution_id == started.physical_execution_id
+        )
+        (failed,) = (
+            event
+            for event in finished.events
+            if isinstance(event, StepFailedEvent) and event.step_id == reservation.step_id
+        )
+        assert isinstance(exited, ProcessExitedEvent) and exited.returncode == 0
+        assert isinstance(quiescent, DescendantsQuiescentEvent)
+        assert receipt.reservation_sequence == reservation.sequence
+        assert receipt.quiescent_sequence == quiescent.sequence
+        assert (
+            started.sequence
+            < exited.sequence
+            < quiescent.sequence
+            < receipt.sequence
+            < failed.sequence
+        )
+        assert receipt.observation.persistence == "observed"
+        file = receipt.observation.file
+        assert file is not None and file.save_verification == "pi_rpc_synced"
+        after, transcript = _native_session_bytes(native_file)
+        assert (
+            (file.device, file.inode)
+            == (after.st_dev, after.st_ino)
+            == (before.st_dev, before.st_ino)
+        )
+        assert (
+            file.size == len(transcript) and file.sha256 == hashlib.sha256(transcript).hexdigest()
+        )
+        assert transcript.startswith(first_append)
+        retained_system, retained_user, failure = _native_session_messages(transcript)
+        assert (retained_system, retained_user) == (system, user)
+        assert failure["role"] == "assistant" and failure["stopReason"] == "error"
+        assert not failure["content"]
+        assert failure["errorMessage"] == "Synthetic terminal inference rejection"
+
+        assert finished.pi_session is not None
+        assert finished.pi_session.persistence == "observed"
+        assert finished.pi_session.save_verification == "pi_rpc_synced"
+        inspection = journal.inspect_pi_session(run_id)
+        assert inspection.availability == "unverified"
+        assert inspection.refusal_code == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        assert inspection.native is not None and inspection.native == finished.pi_session.native
+        revision = journal.read_view().revision
+        fresh = journey.runs("events", run_id, "--after", "0", "--limit", "100", "--json")
+        assert fresh.returncode == 0, fresh.stderr
+        public = json.loads(fresh.stdout)["pi_session"]
+        assert (
+            public["persistence"] == "observed" and public["save_verification"] == "pi_rpc_synced"
+        )
+        assert public["native"] == inspection.native.model_dump(mode="json")
+        assert public["settlement"] == agent.settlement.model_dump(mode="json")
+        assert public["following_steps"] == [
+            {"step_id": verifier.step_id, "settlement": verifier.settlement.model_dump(mode="json")}
+        ]
+        refused = journey.invoke(f"run:{run_id}", _TASKS[1])
+        assert refused.returncode == 2, (refused.stdout[-3000:], refused.stderr[-3000:])
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        assert journal.run_events(run_id) == finished and journal.read_view().revision == revision
+        assert tuple(session_root.iterdir()) == (slot,)
+        assert _native_session_bytes(native_file)[1] == transcript
+        assert journey.requests == [_TASKS[0]] and not journey.errors
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize("cut", ["first-message", "after-tool", "during-tool"])
 def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, during_tool: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cut: Literal["first-message", "after-tool", "during-tool"],
 ) -> None:
     if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
         pytest.skip("The installed worker crash cut requires Linux pidfds")
-    # Both cuts execute the same append-only synthetic effect. The second
-    # keeps the original child alive before Pi can return the tool result.
+    first_message = cut == "first-message"
+    during_tool = cut == "during-tool"
+    # The tool cuts use the same append-only effect. During the tool, keep the
+    # original child alive before Pi can return its result.
     command = f"printf %s {shlex.quote(_TOOL_EFFECT)} >> tool-effect.log"
     command += (
         " && exec /usr/bin/sleep 60"
         if during_tool
         else f" && printf %s {shlex.quote(_PRIVATE_TOOL_OUTPUT)}"
     )
-    with _held_pi_journey(tmp_path, monkeypatch, initial_tool_command=command) as journey:
+    with _held_pi_journey(
+        tmp_path,
+        monkeypatch,
+        hold_request_number=1 if first_message else 2,
+        initial_tool_command=command,
+    ) as journey:
         database_path = journey.database_path
         session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
         effect = journey.repository / "tool-effect.log"
@@ -1194,56 +1389,33 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
                     time.sleep(0.01)
             else:
                 assert journey.held_inference_arrived.wait(65)
-            assert effect.read_text() == _TOOL_EFFECT, (
+            expected_effect = "" if first_message else _TOOL_EFFECT
+            assert effect.read_text() == expected_effect, (
                 journey.errors,
                 log_path.read_text()[-3000:],
             )
-            database = LocalDatabase(database_path, read_only=True)
-            lease = ExecutionCoordinator(database).active_lease()
-            assert lease is not None and lease.fleet_run_id and lease.custody is not None
-            run_id, custody = lease.fleet_run_id, lease.custody
-            assert custody.phase == "WORKER_OWNED"
-            assert custody.owner_pid not in {os.getpid(), controller.pid}
-            active_journal = Journal(database)
-            live = active_journal.run_events(run_id)
-            assert live.run.status is FleetRunStatus.RUNNING
-            assert active_journal.inspect_pi_session(run_id).availability == "busy"
-            (reservation,) = (
-                event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
-            )
-            (started,) = (
-                event
-                for event in live.events
-                if type(event) is ProcessStartedEvent
-                and event.step_id == reservation.step_id
-                and event.sequence > reservation.sequence
-            )
-            assert reservation.attempt_sequence < reservation.sequence < started.sequence
-            assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in live.events)
+            custody, live, reservation, started = _original_pi_writer(database_path, controller.pid)
+            run_id = live.run.fleet_run_id
             slot = session_root / reservation.storage_id
             native_file = slot / PI_SESSION_NEW_FILE.name
-            before = native_file.stat()
-            assert 0 < before.st_size < 1024 * 1024
-            with native_file.open("rb") as stream:
-                transcript = stream.read(before.st_size + 1)
-            assert len(transcript) == before.st_size
+            before, transcript = _native_session_bytes(native_file)
             # Read only the synthetic test transcript to witness the native
             # saved call and whether its result existed at the crash cut.
-            messages = [
-                entry["message"]
-                for entry in map(json.loads, transcript.splitlines())
-                if entry["type"] == "message"
-            ]
+            messages = _native_session_messages(transcript)
+            if first_message:
+                system, user = messages
+                assert system["role"] == "system"
+                assert user["role"] == "user" and _TASKS[0] in _message_text(user)
             assert [
                 part["id"]
                 for message in messages
                 if message["role"] == "assistant"
                 for part in message["content"]
                 if part["type"] == "toolCall"
-            ] == [_TOOL_CALL_ID]
+            ] == ([] if first_message else [_TOOL_CALL_ID])
             assert [
                 message["toolCallId"] for message in messages if message["role"] == "toolResult"
-            ] == ([] if during_tool else [_TOOL_CALL_ID])
+            ] == ([_TOOL_CALL_ID] if cut == "after-tool" else [])
 
             identity = SystemLeaseEnvironment()
             assert identity.process_identity(custody.owner_pid) == custody.owner_identity
@@ -1316,8 +1488,8 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
         assert journal.run_events(run_id) == failed
         assert journal.read_view().revision == revision
-        assert journey.requests == [_TASKS[0]] * (1 if during_tool else 2) and not journey.errors
-        assert effect.read_text() == _TOOL_EFFECT
+        assert journey.requests == [_TASKS[0]] * (2 if cut == "after-tool" else 1)
+        assert not journey.errors and effect.read_text() == expected_effect
         assert tuple(session_root.iterdir()) == (slot,)
         after = native_file.stat()
         assert (after.st_dev, after.st_ino, after.st_size) == (
@@ -2386,7 +2558,7 @@ def test_installed_pi_append_enospc_preserves_original_run_and_session_facts(
         monkeypatch,
         reply_after_hold=True,
         initial_tool_command=effect_command,
-        held_reply=_MODEL_REPLY * 512,
+        held_reply=(_MODEL_REPLY * 512, "stop"),
     ) as journey:
         effect = journey.repository / "tool-effect.log"
         effect.touch()
@@ -2397,6 +2569,7 @@ def test_installed_pi_append_enospc_preserves_original_run_and_session_facts(
                 (
                     "strace",
                     "-f",
+                    "--seccomp-bpf",
                     "-qq",
                     "-yy",
                     "-s",

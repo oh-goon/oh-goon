@@ -106,6 +106,7 @@ class RuntimeFoundation:
     terminal: CommandTerminal | None = None
     standard_process_isolation: ProcessIsolationBackend | None = None
     git_service: GitService | None = None
+    native_git_service: GitService | None = None
     startup_purpose: RuntimeStartupPurpose = "application"
     run_resource_scope: ResolvedRunResourceScope | None = None
     run_resource_envelope: RunResourceEnvelopeEvidence | None = None
@@ -277,6 +278,7 @@ def build_runtime_foundation(
     terminal: CommandTerminal | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
     git_service: GitService | None = None,
+    native_git_service: GitService | None = None,
     startup_purpose: RuntimeStartupPurpose = "application",
     run_resource_scope: ResolvedRunResourceScope | None = None,
     run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
@@ -479,6 +481,7 @@ def build_runtime_foundation(
         terminal=terminal,
         standard_process_isolation=standard_process_isolation,
         git_service=git,
+        native_git_service=native_git_service,
         startup_purpose=startup_purpose,
         run_resource_scope=run_resource_scope,
         run_resource_envelope=run_resource_envelope,

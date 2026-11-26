@@ -168,13 +168,14 @@ uses the actual foreground process and public CLI/API. The real wall-clock
 recurrence and automatic failed-training variants have daily cadence; ordinary
 feedback covers creation, first-interval observation, public pause control,
 an API-started failed occurrence and cancellation of live native training.
-The manual failure verifies failure/readback semantics, not automatic recurrence.
-The separate automatic
-failure waits for the full initial interval and preserves its non-successful
-native training outcome. Existing bounded Schedule owner tests cover timing
-and admission races without pretending their controlled clocks are a
-public-process wall-clock proof. SQLite reopen cases preserve the original due
-anchor after multiple missed intervals. The cancellation fixture repeats the
+The manual failure exercises public admission and failure readback. The
+automatic variants start with a saved Schedule that is already due. The
+foreground application uses its real clock to admit the first Run and settle
+its native training outcome. The recurrence variant then restarts the
+application and observes the next Run after a full interval from the first
+Run's settlement. Bounded Schedule owner tests cover first-due timing and
+admission races, and SQLite reopen cases preserve the original due anchor
+after multiple missed intervals. The cancellation fixture repeats the
 native Iris command finitely to provide an observable training window; it
 requires a completed fit, a live training process, cancellation through the
 original application and native process-session quiescence.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -115,12 +115,31 @@ class AgentReviewObservation(ImmutableModel):
     record: AgentReviewRecord | AgentAdjudicationRecord
 
 
+MAX_NATIVE_ADVISORY_CHARACTERS = 512
+
+
+class NativeFinalAdvisory(ImmutableModel):
+    """Bounded final report text supplied by the original native agent."""
+
+    text: str = Field(min_length=1, max_length=MAX_NATIVE_ADVISORY_CHARACTERS)
+    omitted_characters: int = Field(ge=0)
+
+
 class AgentHarnessObservation(ImmutableModel):
     """Bounded native-agent claim, distinct from supervisor and producer facts."""
 
     kind: Literal["agent", "tool", "context"]
     summary: str = Field(min_length=1, max_length=4000)
     native_event_id: str | None = Field(default=None, min_length=1, max_length=160)
+    final_advisory: NativeFinalAdvisory | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def advisory_requires_agent_claim(self) -> Self:
+        if self.final_advisory is not None and self.kind != "agent":
+            raise ValueError("Final advisory text requires a native agent claim")
+        return self
 
     @field_validator("summary", "native_event_id")
     @classmethod

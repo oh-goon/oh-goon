@@ -1,6 +1,9 @@
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.core.errors import StateConflict
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.scout.service import ScoutService
 from oh_goon.services.catalog_showcase import CatalogShowcaseService
@@ -23,9 +26,27 @@ from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 from oh_goon.services.shared_plans import SharedPlanService
 from oh_goon.services.system_health import SystemHealthService
 
+_startup_builder: Callable[[], ApplicationRuntime] | None = None
+
+
+@contextmanager
+def bind_application_startup(builder: Callable[[], ApplicationRuntime]) -> Iterator[None]:
+    """Bind one explicit startup before the original application is cached."""
+    global _startup_builder
+    if _startup_builder is not None or application.cache_info().currsize:
+        raise StateConflict("The local API runtime is already selected")
+    _startup_builder = builder
+    try:
+        yield
+    finally:
+        application.cache_clear()
+        _startup_builder = None
+
 
 @lru_cache
 def application() -> ApplicationRuntime:
+    if _startup_builder is not None:
+        return _startup_builder()
     return ApplicationRuntime.build()
 
 

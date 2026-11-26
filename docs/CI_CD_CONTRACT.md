@@ -314,7 +314,7 @@ before and after focused execution. Merge execution refuses unresolved selection
 before starting checks. Focused success remains **FOCUSED / NOT_FULLY_VERIFIED**
 and cannot satisfy the independent trusted-base merge gate.
 
-`daily` marks expensive ordinary journeys assigned to daily execution. It is
+`daily` marks expensive ordinary journeys assigned to full regression. It is
 separate from `slow` (exhaustive variants), `process`, `scale` and `certification`.
 Normal selected pytest excludes `certification`, `slow` and `daily`; a necessary
 critical/reproducer proof must be explicitly admitted rather than omitted by
@@ -346,8 +346,9 @@ for the narrowly selected native collection children described below. Missing,
 skipped, failed, cancelled, stale or mismatched proof cannot qualify. The base
 control also rejects missing owners and surviving changed ordinary tests without
 meaningful execution. Absence of reviewed base
-controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
-name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
+controls is **CUTOVER_UNVERIFIED**. A deferred PR event uses the nonrequired
+name **verification-deferred**. Explicit hosted focused feedback still reports
+**FOCUSED / NOT_FULLY_VERIFIED**.
 
 Complete native `classification.static_project` evidence can admit an authored
 frontend member containing only type declarations and explicit type-only imports
@@ -490,19 +491,26 @@ trusted-base merge controller as evidence.
 
 PR, merge-group and main-health concurrency are separate. Superseded PR work is
 cancelled; main pushes execute the installed-source/CLI smoke with only the
-locked backend runtime dependencies. The complete Python CI example runs
-daily as a reusable workflow, with manual dispatch and an opt-in push trigger
-under `codex/python-ci-proof/**`. Qualification branches
+locked backend runtime dependencies. The complete Python CI example runs as
+a reusable workflow during full regression, with manual dispatch and an opt-in
+push trigger under `codex/python-ci-proof/**`. Qualification branches
 retain actual successful or failed job status and original Run receipts;
 ordinary PR updates keep their affected verification portfolio. Package/build
 smoke is admitted when
 its actual distribution boundary changes; ordinary docs do not assemble a release.
 
-PR verification starts on opening, a head update, reopening, and ready/draft
-transitions. Title and description edits do not start verification or replace the
-candidate's check suite. The `edited` trigger is intentionally absent: skipping
-every job after a metadata edit can leave a newer suite without the required
-`merge-gate` result. The gate validates the existing proof; it does not rerun tests.
+Opening a PR, updating its head, reopening it, or changing its review readiness
+queues a verification attempt. Its run title identifies the triggering event.
+Before checkout or dependency setup, admission reads the current PR with read-only
+permissions and compares its head and base with the event. Current drafts, closed
+PRs, and superseded event sources stop at this step. A delayed event for the
+current source of a ready PR runs merge verification even if its snapshot says
+draft. The event's original checkout SHA, head, and base bind all executed proof.
+Unusable PR metadata fails admission and leaves the required gate unsatisfied.
+Use the explicit Focused behavior feedback workflow for hosted draft checks.
+
+Title and description edits leave the candidate's check suite in place.
+The gate validates the existing proof without rerunning tests.
 The verification job exports the immutable artifact ID returned by its native
 upload action. A gate-only retry consumes that producer output, including when
 the successful verification ran in an earlier attempt of the same workflow run.
@@ -612,10 +620,10 @@ coverage percentages are diagnostics; success means retaining meaningful defect
 detection while reducing avoidable waiting and repeated work.
 
 Use focused tests while editing and the admitted fast merge proof for a coherent
-candidate. Complete unrelated owners are daily work. Relevance and cadence are
-separate: retain the smallest real applicable boundary proof before merge and
-leave exhaustive variants daily unless a specific critical obligation or defect
-reproducer requires them now. Neither touching an owner nor editing a slow case
+candidate. Scheduled full regression covers complete unrelated owners. Relevance
+and cadence are separate: retain the smallest real applicable boundary proof
+before merge and leave exhaustive variants for scheduled full regression unless
+a specific critical obligation or defect reproducer requires them now. Neither touching an owner nor editing a slow case
 automatically selects its full campaign.
 
 Materialize only needed native toolchains and reuse valid dependency caches.
@@ -632,23 +640,24 @@ explicit qualification and are never silently admitted by a release command.
 
 Local `make build-release` performs this complete check before artifact assembly.
 The [complete release workflow](../.github/workflows/release-validation.yml) also
-runs the same canonical owners daily and on explicit manual dispatch. Its
+runs the same canonical owners on schedule and on explicit manual dispatch. Its
 `release` mode qualifies the selected immutable candidate before publication;
 the former published-release trigger is removed. Portable success does not
 replace the separately required APP/native/browser/host qualification or the
-release owner's final source/artifact promotion checks. An older nightly SHA
+release owner's final source/artifact promotion checks. An older scheduled SHA
 cannot qualify a newer release. Existing exact-candidate evidence may be reused
 only when the release owner already admits that reuse.
 Ordinary PRs use selected proof and its independent trusted-base `merge-gate`.
 Package smoke runs only for an admitted distribution-boundary change; routine
 updates do not assemble release artifacts or claim APP certification.
 
-## Daily full regression
+## Scheduled full regression
 
-The full workflow runs at **02:23 UTC every day** (03:23 Swedish winter time,
-04:23 summer time), including days when main has not changed. PR updates and
-main pushes do not trigger it. GitHub's scheduler is best effort; a cron entry
-does not establish that a campaign actually ran.
+**Scheduled and release verification** runs at **02:23 UTC on Tuesday, Friday
+and Sunday** (03:23 Swedish winter time, 04:23 summer time). Each slot runs
+against the selected `main` commit, including consecutive slots on the same
+SHA. PR updates and pushes to `main` use the relevant verification workflow.
+GitHub's scheduler is best effort. Use Actions run evidence to confirm execution.
 
 The campaign freezes one main commit before work. Every owner checks out that
 same SHA. `make release-check-plan` projects the existing Make owner's complete
@@ -662,12 +671,18 @@ downloads may use native uv/npm caches; environments and project code are
 materialized for the current checkout. The cross-owner integration job prepares
 the locked frontend tools used by its native TypeScript contract tests. Only
 owners that need Node prepare the pinned version, and only owners that install
-the frontend tools request the npm download cache.
+the frontend tools request the npm download cache. Generated freshness uses
+the Python renderers. Release lock validation uses Node and npm for the lock
+dry run without materializing frontend dependencies.
 
 Backend integration keeps its 180-second batch deadline. The exact native-collected
 `test_one_hundred_real_run_storage_retention` member runs alone with a 900-second
 deadline: the unchanged 100-worker journey measured 529 seconds and includes Iris,
 cancellation, live-lease pruning, retained history, exports and CLI readback.
+Cross-owner integration isolates the native Iris `two-real-clock-occurrences`
+case with a 240-second outer deadline. The case retains its own 176-second
+completion deadline, including cleanup. In the November 24 run it passed in
+162 seconds after repeated timeout refinement of its shared batch.
 The existing batch owner's repeatable `--member-timeout NATIVE_SELECTOR=SECONDS`
 option names unique native-collected tests. Native pytest alone owns selection:
 an excluded test's deadline stays inactive and adds no work or suite-budget demand.
@@ -685,7 +700,7 @@ replace its native exit status and required result receipt.
 
 The complete `check-backend-quality` owner also restores and publishes native
 mypy analysis under the same partition, using the campaign's frozen SHA. The
-daily run on the default branch supplies reusable analysis for later PRs;
+scheduled run on the default branch supplies reusable analysis for later PRs;
 GitHub's merge-ref cache scope limits a PR's own uploads to its reruns. Daily and
 release quality checks still invoke the complete native checker on the frozen
 source, and every other campaign owner retains its original execution.
@@ -713,7 +728,8 @@ Native `-ra` output retains non-PASS reasons. The batch owner's original member
 and discovery receipts remain the result authority.
 
 One daily concurrency domain never cancels an active campaign. Manual catch-up
-uses the same UTC slot and the first attempt's frozen source. When a slot
+uses the same UTC slot and the first attempt's frozen source. Receipts from the
+previous daily cadence retain their original slots. When a slot
 already has an attempt, use **Re-run all jobs** on that Actions run rather than
 creating a new campaign to overwrite a red result. The final join requires every
 owner's fresh evidence from the same run attempt. **Re-run failed jobs** or
@@ -724,9 +740,13 @@ delayed by account capacity; separate groups do not reserve runners. The initial
 one-owner ceiling limits contention. PR latency during a real overlap remains a
 live qualification obligation, not a claim made by this configuration.
 
-Run a missed slot through Actions → **Daily and release verification** →
-**Run workflow**, mode `daily`, with its UTC `YYYY-MM-DD` slot. Leave `ref` blank
-to freeze current main when there was no prior attempt. For release
+Run a missed slot through Actions → **Scheduled and release verification** →
+**Run workflow**, mode `daily`, with its explicit UTC `YYYY-MM-DD` slot. Leave
+`ref` blank to freeze current main when there was no prior attempt. A blank
+`slot` selects the most recent scheduled slot. When catch-up selects an older
+`ref`, the workflow commit owns slot admission and recognizes earlier attempts.
+The selected source owns the complete Make plan, full regression and result
+aggregation. For release
 qualification, select mode `release` and an exact commit SHA; no publication
 occurs. The command-line equivalent is:
 
@@ -737,14 +757,15 @@ uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression h
 ```
 
 The health command reads existing Actions run metadata and bounded result
-artifacts. It reports the expected daily slot, latest attempt, latest complete
+artifacts. It reports the expected scheduled slot, latest attempt, latest complete
 result and last green separately. A fresh completed red is **fresh and failing**;
-an in-progress or incomplete attempt does not refresh completion. A missed slot
-is visible immediately; more than 36 hours without a complete result is the
-outer stale alarm. Missing/expired artifacts remain unknown. No second
-scheduler, monitoring database or fallback cron is introduced.
+an in-progress or incomplete attempt does not refresh completion. A missed expected
+slot is visible immediately. A complete receipt stays fresh through the planned
+gap and for 12 hours after the next scheduled slot. After that grace period,
+health marks coverage stale if no complete receipt covers the expected slot.
+Missing/expired artifacts remain unknown. No second scheduler, monitoring database or fallback cron is introduced.
 
-The repository maintainer **@Hugloss** owns the daily Actions notification and
+The repository maintainer **@Hugloss** owns the scheduled Actions notification and
 next-working-day triage, including checking the expected slot from outside the
 workflow. A workflow cannot detect its own failure to start. Preserve the failed
 SHA and smallest reproducer; classify product, test, infrastructure or missing

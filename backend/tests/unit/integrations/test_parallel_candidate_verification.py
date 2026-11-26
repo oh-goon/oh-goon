@@ -66,7 +66,7 @@ def test_native_patch_accounts_for_nested_binary_addition_deletion_and_edit(tmp_
     stage = tmp_path / "stage"
     stage.mkdir()
 
-    patch, paths = prepare_native_candidate_patch(
+    patch = prepare_native_candidate_patch(
         git,
         original=candidate,
         original_revision=base,
@@ -76,8 +76,9 @@ def test_native_patch_accounts_for_nested_binary_addition_deletion_and_edit(tmp_
         scratch=stage,
     )
 
-    assert paths == ("edit.txt", "new/file.bin", "remove.txt")
-    assert b"GIT binary patch" in patch.read_bytes()
+    assert patch.changed_paths == ("edit.txt", "new/file.bin", "remove.txt")
+    assert b"GIT binary patch" in patch.path.read_bytes()
+    assert _git(git, stage / "replay", "write-tree") == patch.tree
     assert source_snapshot_identity(root) == base_identity
     assert _git(git, root, "rev-parse", "HEAD") == base
 

@@ -4,6 +4,7 @@ import sys
 import sysconfig
 from functools import wraps
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,7 +31,21 @@ def command(directory: Path, *overrides: str) -> subprocess.CompletedProcess[str
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
+
+
+def assert_default_training_artifacts(metrics: dict[str, Any], model: dict[str, Any]) -> None:
+    assert metrics["training_examples"] == 120
+    assert metrics["test_examples"] == 30
+    assert metrics["random_seed"] == 42
+    assert metrics["test_size_percent"] == 20
+    assert metrics["max_iterations"] == 300
+    assert 0.9 <= metrics["accuracy"] < 1
+    assert len(model["coefficients"]) == len(model["classes"]) == 3
+    assert all(len(row) == 4 for row in model["coefficients"])
+    assert len(model["scaler_mean"]) == len(model["scaler_scale"]) == 4
+    assert metrics["scikit_learn_version"] == model["scikit_learn_version"]
 
 
 def test_repeated_seed_reproduces_training_parameters(tmp_path):
@@ -38,6 +53,7 @@ def test_repeated_seed_reproduces_training_parameters(tmp_path):
     assert first.returncode == 0, first.stderr
     original = json.loads((tmp_path / "ml-output/iris-model-parameters.json").read_text())
     original_metrics = (tmp_path / "ml-output/iris-training-metrics.json").read_bytes()
+    assert_default_training_artifacts(json.loads(original_metrics), original)
     second = command(tmp_path, "--training-rounds", "1")
     assert second.returncode == 0, second.stderr
     assert first.stdout == second.stdout == ""
@@ -78,10 +94,9 @@ def test_failed_accuracy_preserves_measured_metrics_and_model(tmp_path):
     result = command(tmp_path, "--minimum-accuracy-percent", "100")
     assert result.returncode == 1, result.stderr
     metrics = json.loads((tmp_path / "ml-output/iris-training-metrics.json").read_text())
+    model = json.loads((tmp_path / "ml-output/iris-model-parameters.json").read_text())
     assert metrics["accuracy"] < metrics["minimum_accuracy"] == 1
-    assert json.loads((tmp_path / "ml-output/iris-model-parameters.json").read_text())[
-        "coefficients"
-    ]
+    assert_default_training_artifacts(metrics, model)
 
 
 def test_multiple_rounds_preserve_the_deterministic_model_and_report_completed_work(

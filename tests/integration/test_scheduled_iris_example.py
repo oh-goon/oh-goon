@@ -208,8 +208,7 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
     tmp_path: Path,
     mode: str,
 ) -> None:
-    # The ordinary Schedule timing/admission tests retain fast boundary proof.
-    # This complete native witness deliberately waits for two real intervals.
+    # The recurrence witness waits a real interval between completed Runs.
     started = time.monotonic()
     deadline = started + 166
     complete_deadline = started + 176
@@ -348,18 +347,35 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
         cli("workflow", "prepare", str(selection), "--no-input")
     selected_bytes = selection.read_bytes()
     schedule_id = "recurring-iris"
-    native(
-        [
-            executable,
-            "plan",
-            "schedule",
-            str(selection),
-            "--schedule-id",
-            schedule_id,
-            "--interval-minutes",
-            "1",
-        ],
-    )
+    schedule_arguments = [
+        "plan",
+        "schedule",
+        str(selection),
+        "--schedule-id",
+        schedule_id,
+        "--interval-minutes",
+        "1",
+    ]
+    if mode in {"clock", "clock-failure"}:
+        # Seed an already-due definition. The separate foreground process uses
+        # its own clock for admission, settlement, and the next interval.
+        native(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                "from datetime import UTC, datetime, timedelta\n"
+                "from sys import argv\n"
+                "from unittest.mock import patch\n"
+                "from oh_goon.cli import main\n"
+                "created_at = datetime.now(UTC) - timedelta(minutes=1)\n"
+                'with patch("oh_goon.runtime.schedule_definitions.utc_now", return_value=created_at):\n'
+                "    raise SystemExit(main(argv[1:]))\n",
+                *schedule_arguments,
+            ]
+        )
+    else:
+        native([executable, *schedule_arguments])
     assert cli("runs", "list")["items"] == []
 
     with socket.socket() as reservation:
@@ -382,7 +398,7 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
     step_execution_ids: set[str] = set()
     readbacks: dict[str, dict[str, Any]] = {}
     receipts: list[dict[str, Any]] = []
-    restarted = False
+    restarted_at: datetime | None = None
     paused_before_cancel = False
     cancellation_requested = False
     process_event: dict[str, Any] | None = None
@@ -629,15 +645,10 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
                     assert datetime.fromisoformat(
                         status["next_run_at"]
                     ) == finished + timedelta(minutes=1)
-                    if (
-                        len(observed) == 1
-                        and not restarted
-                        and datetime.now(UTC)
-                        >= finished + timedelta(minutes=1, seconds=-10)
-                    ):
+                    if mode == "clock" and restarted_at is None:
                         assert _stop(server, complete_deadline) == 0
                         server = launch()
-                        restarted = True
+                        restarted_at = datetime.now(UTC)
                 elif (
                     cancel_training
                     and occurrence["status"] == "RUNNING"
@@ -759,17 +770,19 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
             observed[0]["started_at"]
         ) >= datetime.fromisoformat(definition["created_at"]) + timedelta(minutes=1)
     if mode == "clock":
-        assert datetime.fromisoformat(
-            observed[1]["started_at"]
-        ) >= datetime.fromisoformat(observed[0]["finished_at"]) + timedelta(minutes=1)
+        assert restarted_at is not None
+        second_due = datetime.fromisoformat(observed[0]["finished_at"]) + timedelta(
+            minutes=1
+        )
+        second_started = datetime.fromisoformat(observed[1]["started_at"])
+        assert restarted_at < second_due <= second_started
     elif mode == "pause":
         assert cli("runs", "list")["items"] == []
     elif mode == "clock-failure":
-        assert not manual_started and not restarted
+        assert not manual_started and restarted_at is None
     else:
-        assert manual_started and not restarted
+        assert manual_started and restarted_at is None
     if mode == "clock":
-        assert restarted
         first_id = observed[0]["repository_run"]["fleet_run_id"]
         reopened = cli("runs", "tape", first_id)
         for key in ("status", "configuration", "execution_reference", "repositories"):
@@ -795,7 +808,7 @@ def test_scheduled_iris_uses_real_clock_and_retained_canonical_runs(
         "schedule_id": schedule_id,
         "created_at": definition["created_at"],
         "interval_minutes": definition["interval_minutes"],
-        "restarted_before_second_due": restarted,
+        "restarted_before_second_due": restarted_at is not None,
         "occurrences": receipts,
         "elapsed_seconds": time.monotonic() - started,
     }

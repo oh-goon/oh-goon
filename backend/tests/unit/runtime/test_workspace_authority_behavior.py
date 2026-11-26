@@ -14,6 +14,7 @@ from oh_goon.core.errors import (
     WorkspaceTransitionInvalid,
 )
 from oh_goon.core.models.workspace import WorkspaceRef
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
@@ -39,6 +40,59 @@ def _repository(tmp_path: Path) -> tuple[Path, str]:
 def _authority(tmp_path: Path) -> tuple[RepositoryWorkspaceAuthority, LocalDatabase]:
     database = LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE")
     return RepositoryWorkspaceAuthority(database), database
+
+
+def test_bare_branch_identity_survives_native_symbolic_head_updates(tmp_path: Path) -> None:
+    source, base = _repository(tmp_path)
+    _git("commit", "-qm", "successor", "--allow-empty", cwd=source)
+    successor = _git("rev-parse", "HEAD", cwd=source)
+    owner = tmp_path / "owner.git"
+    _git("init", "-q", "--bare", "--initial-branch=agent", str(owner), cwd=tmp_path)
+    _git("fetch", "-q", "--no-tags", "--no-write-fetch-head", str(source), successor, cwd=owner)
+    _git("update-ref", "refs/heads/agent", base, cwd=owner)
+    assert _git("symbolic-ref", "HEAD", cwd=owner) == "refs/heads/agent"
+    legacy = repository_subject_instance_id(owner)
+    authority = RepositoryWorkspaceAuthority
+    authority.require_bare_branch_owner_identity(owner, legacy)
+    with authority.pin_bare_branch_owner(owner) as (stable, require_current):
+        _git("update-ref", "refs/heads/agent", successor, base, cwd=owner)
+        _git("pack-refs", "--all", cwd=owner)
+        assert _git("rev-parse", "HEAD", cwd=owner) == successor
+        require_current()
+        authority.require_bare_branch_owner_identity(owner, stable)
+        with pytest.raises(WorkspaceStateStale, match="branch owner was replaced"):
+            authority.require_bare_branch_owner_identity(owner, legacy)
+        _git("init", "-q", "--bare", str(owner / ".git"), cwd=tmp_path)
+        assert _git("rev-parse", "--absolute-git-dir", cwd=owner) == str(owner / ".git")
+        with pytest.raises(WorkspaceStateStale, match="outside its bare owner"):
+            require_current()
+
+
+@pytest.mark.parametrize("storage", ("objects", "refs", "config", "reftable"))
+def test_bare_branch_pin_refuses_changed_or_aliased_storage(tmp_path: Path, storage: str) -> None:
+    owner = tmp_path / "owner.git"
+    if storage == "reftable":
+        try:
+            _git("init", "-q", "--bare", "--ref-format=reftable", str(owner), cwd=tmp_path)
+        except subprocess.CalledProcessError as exc:
+            if "ref-format" in exc.stderr and "unknown option" in exc.stderr:
+                pytest.skip("Native Git does not support the reftable ref backend")
+            raise
+    else:
+        _git("init", "-q", "--bare", str(owner), cwd=tmp_path)
+    target = owner / storage
+    with RepositoryWorkspaceAuthority.pin_bare_branch_owner(owner) as (_, require_current):
+        if storage == "config":
+            target.write_bytes(target.read_bytes() + b"\n")
+        else:
+            target.rename(tmp_path / storage)
+            target.mkdir()
+        with pytest.raises(WorkspaceStateStale, match="branch owner was replaced"):
+            require_current()
+    if storage == "config":
+        (tmp_path / "shared-config").hardlink_to(target)
+        with pytest.raises(WorkspaceStateStale, match="own Git storage"):
+            RepositoryWorkspaceAuthority.bare_branch_owner_identity(owner)
 
 
 def _request(
@@ -279,6 +333,7 @@ def test_worktree_materialization_rejects_wrong_contracts_before_registration(
 def test_worktree_registration_failure_restores_empty_owned_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from oh_goon.engine.command import CommandResult
     from oh_goon.engine.git import GitService
 
     repository, revision = _repository(tmp_path)
@@ -286,18 +341,25 @@ def test_worktree_registration_failure_restores_empty_owned_container(
     _read, binding = _ready_snapshot(manager, repository, revision=revision)
     workspace = _request(manager, kind=WorkspaceKind.WORKTREE, revision=revision)
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
+    global_git_config = tmp_path / "gitconfig"
+    global_git_config.write_text(
+        '[filter "lfs"]\n\tclean = cat\n\tprocess = cat\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_git_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
     original_run = GitService.run
 
     def failing_run(self, *args, **kwargs):
         if "worktree" in args and "add" in args:
-            result = original_run(self, "status", "--porcelain", cwd=repository)
-            return result.__class__(
-                returncode=1, stdout="", stderr="synthetic registration failure"
-            )
+            return CommandResult(returncode=1, stdout="", stderr="synthetic registration failure")
         return original_run(self, *args, **kwargs)
 
     monkeypatch.setattr(GitService, "run", failing_run)
-    with pytest.raises(WorkspaceStateStale, match="Cannot register candidate Git worktree"):
+    with pytest.raises(
+        WorkspaceStateStale,
+        match="Cannot register candidate Git worktree: synthetic registration failure",
+    ):
         manager.materialize_worktree(
             workspace,
             repository,

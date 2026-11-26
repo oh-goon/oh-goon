@@ -246,6 +246,50 @@ the same workspace custody and access rules are demonstrated at the selected
 capacity and the evaluation shows where extra agents improve verified outcomes.
 Qualify additional harness modes against the same requirements.
 
+Recurring collaboration uses fresh, individually bounded Runs. A later round
+selects reviewed branch content and any exported note document explicitly.
+Use native Git to apply an exact verified export onto an operator-selected
+branch, then rerun acceptance on the receiving source. Live note permissions
+belong to the admitted task and Step. A reviewed note document can travel as
+captured context while writer capabilities, native sessions, and verification
+authority remain scoped to their original owner.
+
+Recurring time triggers belong to the existing Schedule owner. A selected
+single-repository read-only review can recur on its exact captured source and
+delivery through the [public local Schedule flow](../AUTOMATION_MODEL.md#recurring-native-reviews).
+Pausing prevents new admissions. Existing Runs settle through their original
+owners. The operator selects the branch, commit and reviewed Skill for a fresh
+writable candidate through the [named-branch handoff](../AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch).
+
+The [local writable round](../AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
+binds the selected predecessor, published branch commit and receiving source to
+the original Fleet admission. The dedicated bare repository holds the branch and
+its native publication witness. The separate registered checkout supplies exact
+detached source. Replaying the same request reopens its original receipt or Run.
+The successor runs the frozen baseline and outgoing verifiers in its own Step
+lifecycle. A verified result may authorize another advance on the same lineage.
+
+The [writable Schedule](../AUTOMATION_MODEL.md#scheduled-writable-rounds)
+selects the next entry from one immutable, operator-approved task list. The
+original Schedule occurrence records selection before publication or admission.
+The original Fleet admission commits the actual successor target and its
+Schedule binding together. Restart reopens the same selection, branch receipt
+and Run. A failed predecessor or an exhausted task list stops further selection.
+
+The [offline host handoff](../AUTOMATION_MODEL.md#move-scheduled-writable-work-to-another-host)
+transfers the selected Git ref and reviewed task documents. The receiving host
+starts its own qualifying Run from the transferred commit and records its own
+verified branch seed. Restart evidence belongs to the receiving Schedule and
+its local Journal.
+
+Advance unattended collaboration in this order and verify each boundary on the
+selected environment.
+
+| Boundary | Required behavior and proof |
+| --- | --- |
+| A second environment | Give each runtime its own registration, state, tool configuration and model authorization. Transfer explicit Git source and selected task documents. Demonstrate fresh repository evidence and native verification there, with controlled restart or loss of either environment. Remote publication and model egress follow their independently authorized owner. |
+| Cross-environment live notes | Admit task membership and note recipients on each worker, then prove simultaneous attributed delivery, cancellation fencing and retention on the selected transport. An exported document remains a practical handoff when no cross-host delivery is qualified. |
+
 ## Requirements review method
 
 Use the project's [agentsCookbook pin](agents-cookbook-source.json) for lifecycle

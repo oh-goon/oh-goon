@@ -220,6 +220,12 @@ existing lifecycle/recovery owners; a persisted token does not preserve process 
 custody. A workspace ID identifies its durable allocation: stale references, lifecycle versions,
 checkpoints, assignments, leases, or physical bindings can be rejected without replacing that ID.
 
+Branch advancement binds the dedicated bare Git owner's local storage under
+`RepositoryWorkspaceAuthority`. Git may change the bare root directory timestamp
+while publishing a ref. The bare owner binding tracks the Git storage and its
+configuration across those changes. Receiving Fleet Runs independently capture
+their current repository-subject token and verified source bytes.
+
 ### FleetRun lifecycle state is structural
 FleetRun state is represented with explicit structural states rather than loosely related booleans or implicit event-position assumptions.
 
