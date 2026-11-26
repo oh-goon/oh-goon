@@ -16,9 +16,11 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.writable_schedule import WritableSchedulePolicy
 from oh_goon.core.product_identity import new_schedule_generation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import ScheduleState
+from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
 
 
@@ -52,10 +54,54 @@ class ScheduleDefinitionStore:
             raise ScheduleNotFound(f"Unknown Schedule: {schedule_id}")
         return _definition(row)
 
-    def create(self, schedule_id: str, request: ScheduleCreate) -> ScheduleDefinition:
+    def writable_policy(self, generation_id: str) -> WritableSchedulePolicy | None:
+        with self._database.transaction() as connection:
+            return self.writable_policy_in(connection, generation_id)
+
+    @staticmethod
+    def writable_policy_in(
+        connection: sqlite3.Connection, generation_id: str
+    ) -> WritableSchedulePolicy | None:
+        try:
+            row = connection.execute(
+                "SELECT seed_advance_id, policy_json FROM schedule_writable_policies "
+                "WHERE generation_id=?",
+                (generation_id,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if str(exc) != "no such table: schedule_writable_policies":
+                raise
+            return None
+        if row is None:
+            return None
+        policy = WritableSchedulePolicy.model_validate_json(row["policy_json"])
+        if policy.seed_advance_id != row["seed_advance_id"]:
+            raise StateConflict("Writable Schedule policy differs from its reserved seed")
+        return policy
+
+    def seed_reserved(self, advance_id: str) -> bool:
+        with self._database.transaction() as connection:
+            try:
+                row = connection.execute(
+                    "SELECT 1 FROM schedule_writable_policies WHERE seed_advance_id=?",
+                    (advance_id,),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if str(exc) != "no such table: schedule_writable_policies":
+                    raise
+                return False
+            return row is not None
+
+    def create(
+        self,
+        schedule_id: str,
+        request: ScheduleCreate,
+        *,
+        writable_policy: WritableSchedulePolicy | None = None,
+    ) -> ScheduleDefinition:
         existing = self._find(schedule_id)
         if existing is not None:
-            return _require_matching_create(existing, request)
+            return self._require_matching_create(existing, request, writable_policy)
         now = utc_now()
         definition = ScheduleDefinition(
             schedule_id=schedule_id,
@@ -73,17 +119,42 @@ class ScheduleDefinitionStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     _definition_values(definition),
                 )
+                if writable_policy is not None:
+                    _reserve_writable_policy(connection, definition, writable_policy)
             return definition
         except sqlite3.IntegrityError:
             existing = self._find(schedule_id)
             if existing is None:
                 raise
-            return _require_matching_create(existing, request)
+            return self._require_matching_create(existing, request, writable_policy)
         except BaseException:
             existing = self._find(schedule_id)
-            if existing is not None and _matches_create(existing, request):
+            if existing is not None and self._matches_create(existing, request, writable_policy):
                 return existing
             raise
+
+    def _matches_create(
+        self,
+        existing: ScheduleDefinition,
+        request: ScheduleCreate,
+        writable_policy: WritableSchedulePolicy | None,
+    ) -> bool:
+        return (
+            _matches_create(existing, request)
+            and self.writable_policy(existing.generation_id) == writable_policy
+        )
+
+    def _require_matching_create(
+        self,
+        existing: ScheduleDefinition,
+        request: ScheduleCreate,
+        writable_policy: WritableSchedulePolicy | None,
+    ) -> ScheduleDefinition:
+        if not self._matches_create(existing, request, writable_policy):
+            raise StateConflict(
+                f"Schedule identity {existing.schedule_id} is already bound to another definition"
+            )
+        return existing
 
     def replace(self, schedule_id: str, request: ScheduleReplace) -> ScheduleDefinition:
         try:
@@ -93,6 +164,12 @@ class ScheduleDefinitionStore:
                     raise ScheduleDefinitionStale(
                         f"Schedule definition generation changed concurrently: {schedule_id}"
                     )
+                if self.writable_policy_in(connection, current.generation_id) is not None and (
+                    request.repository_ids != current.repository_ids
+                    or request.repository_instance_ids != current.repository_instance_ids
+                    or request.target != current.target
+                ):
+                    raise StateConflict("Writable Schedule can only update name, timing and state")
                 if request.record_version == current.record_version - 1 and _matches_replace(
                     current, request
                 ):
@@ -236,18 +313,55 @@ def _request_from_definition(definition: ScheduleDefinition) -> ScheduleCreate:
     )
 
 
-def _require_matching_create(
-    existing: ScheduleDefinition, request: ScheduleCreate
-) -> ScheduleDefinition:
-    if not _matches_create(existing, request):
-        raise StateConflict(
-            f"Schedule identity {existing.schedule_id} is already bound to another definition"
-        )
-    return existing
-
-
 def _matches_create(existing: ScheduleDefinition, request: ScheduleCreate) -> bool:
     return _request_from_definition(existing) == request
+
+
+def _reserve_writable_policy(
+    connection: sqlite3.Connection,
+    definition: ScheduleDefinition,
+    policy: WritableSchedulePolicy,
+) -> None:
+    receipt = BranchAdvanceStore.find_in(connection, policy.seed_advance_id)
+    if (
+        receipt is None
+        or receipt.published_at is None
+        or receipt.next_run is not None
+        or definition.repository_ids != (receipt.preparation.repository_id,)
+    ):
+        raise StateConflict(
+            "Writable Schedule requires an unused published branch receipt for its repository"
+        )
+    prepared = receipt.preparation
+    competing = connection.execute(
+        "SELECT 1 FROM schedule_writable_policies AS policy "
+        "JOIN branch_advances AS seed ON seed.advance_id = policy.seed_advance_id "
+        "WHERE policy.branch_ref=? AND (policy.branch_owner_subject_id=? "
+        "OR json_extract(seed.preparation_json, '$.branch_owner_path')=?)",
+        (
+            prepared.branch_ref,
+            prepared.branch_owner_subject_id,
+            str(prepared.branch_owner_path),
+        ),
+    ).fetchone()
+    if competing is not None:
+        raise StateConflict("Writable Schedule already owns this seed, branch or checkout")
+    try:
+        connection.execute(
+            "INSERT INTO schedule_writable_policies "
+            "(generation_id, seed_advance_id, checkout_identity, branch_owner_subject_id, branch_ref, policy_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                definition.generation_id,
+                policy.seed_advance_id,
+                prepared.checkout_identity,
+                prepared.branch_owner_subject_id,
+                prepared.branch_ref,
+                policy.model_dump_json(),
+            ),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise StateConflict("Writable Schedule already owns this seed, branch or checkout") from exc
 
 
 def _matches_replace(existing: ScheduleDefinition, request: ScheduleReplace) -> bool:

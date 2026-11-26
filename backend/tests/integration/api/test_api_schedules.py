@@ -6,7 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
-from oh_goon.core.models.schedule import ScheduleDeleteRequest
+from oh_goon.api.app import create_app
+from oh_goon.api.schemas.schedule import (
+    RetainedReviewScheduleCreateRequest,
+    WritableScheduleCreateRequest,
+)
+from oh_goon.core.models.schedule import ScheduleDefinition, ScheduleDeleteRequest
+from oh_goon.core.models.writable_schedule import WritableScheduleTask
 from tests.factories.schedules import schedule_create
 from tests.integration.api.client import authenticated_api_client
 
@@ -99,6 +105,103 @@ def test_schedule_api_exposes_saved_plan_creation_and_metadata_only_replace() ->
                     record_version=definition.record_version,
                 ),
             )
+
+
+def test_retained_review_schedule_requires_local_access_and_exact_run_selection() -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from oh_goon.api.dependencies import fleet_plan_service
+    from tests.factories.schedules import schedule_definition
+
+    calls = []
+
+    def schedule(
+        run_id: str, *, schedule_id: str, name: str | None, interval_minutes: int
+    ) -> ScheduleDefinition:
+        calls.append((run_id, schedule_id, name, interval_minutes))
+        return schedule_definition(
+            now=datetime(2026, 8, 21, tzinfo=UTC),
+            schedule_id=schedule_id,
+            name=name or "Native review",
+            repository_ids=("review-source",),
+            interval_minutes=interval_minutes,
+        )
+
+    app = create_app(local_access_token="schedule-review-test-token")
+    app.dependency_overrides[fleet_plan_service] = lambda: SimpleNamespace(
+        schedule_retained_review=schedule
+    )
+    route = "/api/schedules/review/from-review-run"
+    request = RetainedReviewScheduleCreateRequest(
+        fleet_run_id="fleet-original", name="Nightly review", interval_minutes=60
+    ).model_dump(mode="json")
+    with closing(TestClient(app)) as anonymous:
+        assert anonymous.post(route, json=request).status_code == 401
+    with closing(authenticated_api_client(app)) as client:
+        assert client.post(route, json={**request, "target": {}}).status_code == 422
+        assert client.post(route, json={**request, "interval_minutes": 0}).status_code == 422
+        assert client.post(route, json={**request, "fleet_run_id": "x" * 161}).status_code == 422
+        assert client.post(route, json={**request, "name": "x" * 81}).status_code == 422
+        assert calls == []
+        result = client.post(route, json=request)
+        assert result.status_code == 201
+        assert result.json()["schedule_id"] == "review"
+    assert calls == [("fleet-original", "review", "Nightly review", 60)]
+
+
+def test_writable_schedule_accepts_ordered_tasks_under_local_access() -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from oh_goon.api.dependencies import schedule_service
+    from tests.factories.schedules import schedule_definition
+
+    authored = WritableScheduleCreateRequest(
+        seed_advance_id="published-seed",
+        tasks=(
+            WritableScheduleTask(task_id="first", prompt="Check the first private task."),
+            WritableScheduleTask(task_id="second", prompt="Check the second private task."),
+        ),
+        interval_minutes=2,
+    )
+    calls: list[tuple[object, ...]] = []
+
+    def schedule(
+        schedule_id: str,
+        *,
+        seed_advance_id: str,
+        tasks: tuple[WritableScheduleTask, ...],
+        interval_minutes: int,
+        name: str | None,
+    ) -> ScheduleDefinition:
+        calls.append((schedule_id, seed_advance_id, tasks, interval_minutes, name))
+        return schedule_definition(
+            now=datetime(2026, 8, 21, tzinfo=UTC),
+            schedule_id=schedule_id,
+            name="Writable tasks",
+            repository_ids=("receiving",),
+            interval_minutes=interval_minutes,
+        )
+
+    app = create_app(local_access_token="schedule-writable-test-token")
+    app.dependency_overrides[schedule_service] = lambda: SimpleNamespace(
+        create_writable_rounds=schedule
+    )
+    route = "/api/schedules/writable/from-branch-advance"
+    body = authored.model_dump(mode="json")
+    with closing(TestClient(app)) as anonymous:
+        assert anonymous.post(route, json=body).status_code == 401
+    with closing(authenticated_api_client(app)) as client:
+        assert client.post(route, json={**body, "tasks": []}).status_code == 422
+        assert client.post(route, json={**body, "tasks": [body["tasks"][0]] * 2}).status_code == 422
+        assert client.post(route, json={**body, "native_profile": "override"}).status_code == 422
+        assert calls == []
+        result = client.post(route, json=body)
+        assert result.status_code == 201
+        assert result.json()["schedule_id"] == "writable"
+        assert all(task.prompt not in result.text for task in authored.tasks)
+    assert calls == [("writable", "published-seed", authored.tasks, 2, None)]
 
 
 def test_schedule_can_be_created_from_shared_plan_without_browser_resolution() -> None:

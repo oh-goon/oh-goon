@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,6 +44,7 @@ from oh_goon.services.repositories import RepositoryService
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner
 from oh_goon.services.schedule_execution import ScheduleExecutionEngine
+from oh_goon.services.schedule_writable_rounds import WritableScheduleRounds
 from oh_goon.services.schedules import ScheduleService
 from oh_goon.services.security import SecurityService
 from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
@@ -125,6 +129,14 @@ def _build_fleet_services(
         worker_configuration=lambda fleet_run_id: capture_run_worker_submission(
             foundation, fleet_run_id
         ),
+        native_worker_configuration=(
+            partial(
+                capture_run_worker_submission,
+                replace(foundation, git_service=foundation.native_git_service),
+            )
+            if foundation.native_git_service is not None
+            else None
+        ),
         run_capacity=foundation.run_capacity,
         worker_exit_recovery=lambda run_id: foundation.effect_recovery.recover(
             fleet_run_id=run_id, quiescence_timeout_seconds=0.0
@@ -135,8 +147,21 @@ def _build_fleet_services(
 def _build_schedule_services(
     foundation: RuntimeFoundation,
     runs: FleetRunControlPlane,
+    repositories: RepositoryService,
+    plans: Callable[[], FleetPlanService],
 ) -> tuple[ScheduleService, ScheduleScheduler]:
-    engine = ScheduleExecutionEngine(foundation.schedule_executions, runs)
+    writable = WritableScheduleRounds(
+        foundation.database,
+        foundation.schedule_definitions,
+        foundation.schedule_executions,
+        runs,
+        repositories,
+        plans,
+        foundation.native_git_service,
+    )
+    engine = ScheduleExecutionEngine(
+        foundation.schedule_executions, runs, start_writable=writable.start
+    )
     admission = ScheduleAdmissionPlanner(
         foundation.database,
         foundation.schedule_definitions,
@@ -151,6 +176,7 @@ def _build_schedule_services(
         engine,
         admission,
         foundation.runtime_safety,
+        writable_rounds=writable,
     )
     return schedules, ScheduleScheduler(schedules.tick, diagnostics=foundation.diagnostics)
 
@@ -164,7 +190,9 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
     repositories = RepositoryService(foundation.state, discovery)
     migration = MigrationService(foundation.state, discovery)
     runs = _build_fleet_services(foundation, repositories, migration, league)
-    schedules, schedule_scheduler = _build_schedule_services(foundation, runs)
+    schedules, schedule_scheduler = _build_schedule_services(
+        foundation, runs, repositories, lambda: plans
+    )
     goon_templates = GoonTemplateStore()
     plan_templates = PlanTemplateStore()
     plan_resolver = FleetPlanResolver(
@@ -184,6 +212,7 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         terminal=foundation.terminal,
         standard_process_isolation=foundation.standard_process_isolation,
         git_service=foundation.git_service,
+        native_git_service=foundation.native_git_service,
         repositories=repositories,
         workspace_database=foundation.database,
         run_concurrency=foundation.run_capacity.policy if foundation.run_capacity else None,

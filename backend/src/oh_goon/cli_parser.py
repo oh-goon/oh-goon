@@ -105,6 +105,13 @@ def _add_local_app_commands[_Parser: argparse.ArgumentParser](
         help="Loopback host only; oh-goon never binds to a public interface.",
     )
     serve.add_argument("--port", type=int, default=8787)
+    serve.add_argument(
+        "--scheduled-agent-workspace", type=Path, help="Exact Git root for retained Agent reviews"
+    )
+    serve.add_argument("--scheduled-agent-profile", help="Managed Pi profile for retained reviews")
+    serve.add_argument(
+        "--scheduled-agent-catalog", type=Path, help="Explicit provider catalog for that profile"
+    )
 
 
 def _add_local_state_commands[_Parser: argparse.ArgumentParser](

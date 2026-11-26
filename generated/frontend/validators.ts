@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 746f7ed29ad916f1fb609644ee6272d1222689e1989e9af709c18fa9695e5ef5
+// OPENAPI_SHA256: 002863b5488939e077e0a5ff72d50a1e5da62ef59478ae0e68804ed84877d523
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -34,6 +34,7 @@ import { validatePrivacyResponse } from "@generated/validatorParts/validatorPart
 import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart044";
 import { validateRecoveryAcknowledgeRequest, validateRecoveryReconcileRequest, validateRecoveryStatus } from "@generated/validatorParts/validatorPart045";
 import { validateRemoveLocationRequest, validateRepositoryCatalogEntry, validateRepositoryDependencyPage } from "@generated/validatorParts/validatorPart046";
+import { validateRetainedReviewScheduleCreateRequest } from "@generated/validatorParts/validatorPart051";
 import { validateRunArtifactExport, validateRunArtifactExportRequest } from "@generated/validatorParts/validatorPart052";
 import { validateRunFeedback } from "@generated/validatorParts/validatorPart053";
 import { validateScheduleCatalog } from "@generated/validatorParts/validatorPart055";
@@ -47,6 +48,7 @@ import { validateSharedPlanLockPreview, validateSharedPlanLockPreviewRequest, va
 import { validateSharedPlanScheduleCreateRequest } from "@generated/validatorParts/validatorPart063";
 import { validateSystemHealth, validateTeamRunRequest } from "@generated/validatorParts/validatorPart064";
 import { validateWaitingPlacementQueueEntry } from "@generated/validatorParts/validatorPart066";
+import { validateWritableScheduleCreateRequest } from "@generated/validatorParts/validatorPart067";
 
 export { ContractValidationError } from "@generated/validatorRuntime";
 
@@ -98,6 +100,14 @@ export function decodeOperationRequest(name: OperationName, value: unknown): unk
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationRequest", validateAgentContinuationRequest, value, "$", "continue_agent_campaign request", new Set());
+      return value;
+    }
+    case "create_schedule_from_branch_advance": {
+      validateReference("WritableScheduleCreateRequest", validateWritableScheduleCreateRequest, value, "$", "create_schedule_from_branch_advance request", new Set());
+      return value;
+    }
+    case "create_schedule_from_retained_review": {
+      validateReference("RetainedReviewScheduleCreateRequest", validateRetainedReviewScheduleCreateRequest, value, "$", "create_schedule_from_retained_review request", new Set());
       return value;
     }
     case "create_schedule_from_shared_plan": {
@@ -270,6 +280,14 @@ export function decodeOperationResponse(name: OperationName, value: unknown): un
     }
     case "continue_agent_campaign": {
       validateReference("AgentContinuationResult", validateAgentContinuationResult, value, "$", "continue_agent_campaign response", new Set());
+      return value;
+    }
+    case "create_schedule_from_branch_advance": {
+      validateReference("ScheduleDefinition", validateScheduleDefinition, value, "$", "create_schedule_from_branch_advance response", new Set());
+      return value;
+    }
+    case "create_schedule_from_retained_review": {
+      validateReference("ScheduleDefinition", validateScheduleDefinition, value, "$", "create_schedule_from_retained_review response", new Set());
       return value;
     }
     case "create_schedule_from_shared_plan": {

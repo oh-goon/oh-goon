@@ -1,7 +1,16 @@
 from fastapi import APIRouter, Depends, Query
 
-from oh_goon.api.dependencies import schedule_service, shared_plan_schedule_service
-from oh_goon.api.schemas.schedule import ScheduleRunRequest, SharedPlanScheduleCreateRequest
+from oh_goon.api.dependencies import (
+    fleet_plan_service,
+    schedule_service,
+    shared_plan_schedule_service,
+)
+from oh_goon.api.schemas.schedule import (
+    RetainedReviewScheduleCreateRequest,
+    ScheduleRunRequest,
+    SharedPlanScheduleCreateRequest,
+    WritableScheduleCreateRequest,
+)
 from oh_goon.core.models.schedule import (
     ScheduleCatalog,
     ScheduleDefinition,
@@ -11,6 +20,7 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.vocabulary import ScheduleOccurrenceFilter
+from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.schedules import ScheduleService
 from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 
@@ -45,6 +55,45 @@ def create_from_shared_plan(
         interval_minutes=request.interval_minutes,
         state=request.state,
         inputs=request.inputs,
+    )
+
+
+@router.post(
+    "/{schedule_id}/from-review-run",
+    response_model=ScheduleDefinition,
+    status_code=201,
+    operation_id="create_schedule_from_retained_review",
+)
+def create_from_retained_review(
+    schedule_id: str,
+    request: RetainedReviewScheduleCreateRequest,
+    service: FleetPlanService = Depends(fleet_plan_service),
+) -> ScheduleDefinition:
+    return service.schedule_retained_review(
+        request.fleet_run_id,
+        schedule_id=schedule_id,
+        name=request.name,
+        interval_minutes=request.interval_minutes,
+    )
+
+
+@router.post(
+    "/{schedule_id}/from-branch-advance",
+    response_model=ScheduleDefinition,
+    status_code=201,
+    operation_id="create_schedule_from_branch_advance",
+)
+def create_from_branch_advance(
+    schedule_id: str,
+    request: WritableScheduleCreateRequest,
+    service: ScheduleService = Depends(schedule_service),
+) -> ScheduleDefinition:
+    return service.create_writable_rounds(
+        schedule_id,
+        seed_advance_id=request.seed_advance_id,
+        tasks=request.tasks,
+        name=request.name,
+        interval_minutes=request.interval_minutes,
     )
 
 

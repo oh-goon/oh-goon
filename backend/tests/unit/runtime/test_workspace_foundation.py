@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from oh_goon.core.errors import WorkspaceStateStale, WorkspaceTransitionInvalid
 from oh_goon.core.models.workspace import WorkspaceRef
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, LocalDatabase
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
@@ -25,6 +26,27 @@ def _requested(
         base_revision="0123456789abcdef",
         kind=kind,
     )
+
+
+def test_receiving_checkout_retains_identity_across_its_admitted_source_change(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    config = checkout / ".git/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("[core]\n\tbare = false\n", encoding="utf-8")
+    with RepositoryWorkspaceAuthority.pin_repository_subject(checkout) as require_current:
+        before = repository_subject_instance_id(checkout)
+        checkout_identity = RepositoryWorkspaceAuthority.receiving_checkout_identity(checkout)
+        (checkout / "tracked.txt").write_text("Receiving source\n", encoding="utf-8")
+        require_current()
+        assert repository_subject_instance_id(checkout) != before
+        assert (
+            RepositoryWorkspaceAuthority.receiving_checkout_identity(checkout) == checkout_identity
+        )
+
+    config.write_text("[core]\n\tbare = false\n\tfilemode = true\n", encoding="utf-8")
+    assert RepositoryWorkspaceAuthority.receiving_checkout_identity(checkout) != checkout_identity
 
 
 def test_workspace_ref_is_immutable_identity_without_state_or_path(tmp_path: Path) -> None:
