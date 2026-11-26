@@ -346,8 +346,9 @@ for the narrowly selected native collection children described below. Missing,
 skipped, failed, cancelled, stale or mismatched proof cannot qualify. The base
 control also rejects missing owners and surviving changed ordinary tests without
 meaningful execution. Absence of reviewed base
-controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
-name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
+controls is **CUTOVER_UNVERIFIED**. A deferred PR event uses the nonrequired
+name **verification-deferred**. Explicit hosted focused feedback still reports
+**FOCUSED / NOT_FULLY_VERIFIED**.
 
 Complete native `classification.static_project` evidence can admit an authored
 frontend member containing only type declarations and explicit type-only imports
@@ -498,11 +499,18 @@ ordinary PR updates keep their affected verification portfolio. Package/build
 smoke is admitted when
 its actual distribution boundary changes; ordinary docs do not assemble a release.
 
-PR verification starts on opening, a head update, reopening, and ready/draft
-transitions. Title and description edits do not start verification or replace the
-candidate's check suite. The `edited` trigger is intentionally absent: skipping
-every job after a metadata edit can leave a newer suite without the required
-`merge-gate` result. The gate validates the existing proof; it does not rerun tests.
+Opening a PR, updating its head, reopening it, or changing its review readiness
+queues a verification attempt. Its run title identifies the triggering event.
+Before checkout or dependency setup, admission reads the current PR with read-only
+permissions and compares its head and base with the event. Current drafts, closed
+PRs, and superseded event sources stop at this step. A delayed event for the
+current source of a ready PR runs merge verification even if its snapshot says
+draft. The event's original checkout SHA, head, and base bind all executed proof.
+Unusable PR metadata fails admission and leaves the required gate unsatisfied.
+Use the explicit Focused behavior feedback workflow for hosted draft checks.
+
+Title and description edits leave the candidate's check suite in place.
+The gate validates the existing proof without rerunning tests.
 The verification job exports the immutable artifact ID returned by its native
 upload action. A gate-only retry consumes that producer output, including when
 the successful verification ran in an earlier attempt of the same workflow run.

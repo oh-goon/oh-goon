@@ -53,7 +53,9 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     ]
     assert len(preparation_steps) == 1
     expected_condition = "env.OH_GOON_TEST_CPUS != '0'"
-    if "matrix" in job.get("strategy", {}):
+    if "eligibility" in job.get("outputs", {}):
+        expected_condition += " && steps.eligibility.outputs.state == 'verify'"
+    elif "matrix" in job.get("strategy", {}):
         expected_condition += (
             " || matrix.target == 'check-backend-tests'"
             " || matrix.target == 'test-backend-integration'"
@@ -723,7 +725,15 @@ def test_pull_request_checks_have_read_only_uncredentialed_execution(
     )
     assert workflow["permissions"] == {"contents": "read"}
     for job_name, job in workflow["jobs"].items():
-        assert "permissions" not in job
+        if workflow_name == "ci.yml" and job_name == "admit":
+            assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
+            assert [
+                step.get("id")
+                for step in job["steps"]
+                if "GH_TOKEN" in step.get("env", {})
+            ] == ["eligibility"]
+        else:
+            assert "permissions" not in job
         assert "secrets" not in job
         for step in job["steps"]:
             if "uses" in step:
@@ -1083,7 +1093,7 @@ def test_independent_jobs_execute_one_plan_before_the_existing_proof_aggregate()
     proof = jobs["verify"]
     assert proof["name"] == "selected-proof" and "always()" in proof["if"]
     assert set(proof["needs"]) == {"admit", "static", "behavioral"}
-    assert _merge_aggregate()["needs"] == "verify"
+    assert set(_merge_aggregate()["needs"]) == {"admit", "verify"}
     downloads = [
         step
         for step in proof["steps"]
@@ -1395,15 +1405,127 @@ def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> Non
 
     proof = workflow["jobs"]["admit"]
     assert proof["if"] == "github.event_name != 'push'"
-    assert _merge_aggregate()["if"] == "always() && github.event_name != 'push'"
+    assert workflow["env"]["VERIFY_MODE"] == "merge"
+    assert "github.event.pull_request.draft" not in json.dumps(workflow)
+    assert proof["outputs"]["eligibility"] == "${{ steps.eligibility.outputs.state }}"
+    assert workflow["jobs"]["verify"]["if"] == (
+        "always() && github.event_name != 'push' && needs.admit.outputs.eligibility == 'verify'"
+    )
     assert "github.event.pull_request.base.sha" in proof["env"]["BASE_SHA"]
     assert "github.event.merge_group.base_sha" in proof["env"]["BASE_SHA"]
     assert "github.event.pull_request.head.sha" in proof["env"]["REQUESTED_HEAD"]
     assert "github.event.merge_group.head_sha" in proof["env"]["REQUESTED_HEAD"]
     aggregate = _merge_aggregate()
+    assert aggregate["if"] == (
+        "always() && github.event_name != 'push' && needs.admit.outputs.eligibility != 'deferred'"
+    )
     assert aggregate["env"]["BASE_SHA"] == proof["env"]["BASE_SHA"]
     assert aggregate["env"]["REQUESTED_HEAD"] == proof["env"]["REQUESTED_HEAD"]
     assert workflow["jobs"]["main-health"]["if"] == "github.event_name == 'push'"
+
+
+@pytest.mark.parametrize(
+    "event,metadata,expected",
+    [
+        pytest.param(
+            "pull_request", ("open", "false", "a" * 40, "b" * 40), "verify", id="ready"
+        ),
+        pytest.param(
+            "pull_request", ("open", "true", "a" * 40, "b" * 40), "deferred", id="draft"
+        ),
+        pytest.param(
+            "pull_request",
+            ("open", "false", "c" * 40, "b" * 40),
+            "deferred",
+            id="stale-head",
+        ),
+        pytest.param(
+            "pull_request",
+            ("open", "false", "a" * 40, "c" * 40),
+            "deferred",
+            id="stale-base",
+        ),
+        pytest.param(
+            "pull_request",
+            ("closed", "false", "a" * 40, "b" * 40),
+            "deferred",
+            id="closed",
+        ),
+        pytest.param(
+            "pull_request",
+            ("open", "null", "a" * 40, "b" * 40),
+            None,
+            id="invalid-metadata",
+        ),
+        pytest.param("pull_request", None, None, id="metadata-unavailable"),
+        pytest.param("merge_group", None, "verify", id="merge-group"),
+        pytest.param("workflow_dispatch", None, "verify", id="manual-replay"),
+    ],
+)
+def test_pr_events_require_current_ready_source_before_setup(
+    tmp_path: Path, event: str, metadata: tuple[str, ...] | None, expected: str | None
+) -> None:
+    steps = _workflow()["jobs"]["admit"]["steps"]
+    eligibility = steps[0]
+    assert eligibility["id"] == "eligibility"
+    assert "continue-on-error" not in eligibility
+    assert all(
+        "steps.eligibility.outputs.state == 'verify'" in step.get("if", "")
+        or step.get("if") == "steps.capabilities.outputs.frontend == 'true'"
+        for step in steps[1:]
+    )
+    client = tmp_path / "gh"
+    client.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$RECORDED_REQUEST"\n'
+        'test "$API_RESULT" = success || exit 1\nprintf "%s\\n" "$PR_METADATA"\n',
+        encoding="utf-8",
+    )
+    client.chmod(0o755)
+    output, summary, request = (
+        tmp_path / name for name in ("output", "summary", "request")
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            eligibility["run"],
+        ],
+        env={
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "GITHUB_EVENT_NAME": event,
+            "GITHUB_REPOSITORY": "example/project",
+            "PR_NUMBER": "272",
+            "REQUESTED_HEAD": "a" * 40,
+            "BASE_SHA": "b" * 40,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "RECORDED_REQUEST": str(request),
+            "API_RESULT": "success" if metadata is not None else "failure",
+            "PR_METADATA": "\t".join(metadata or ()),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert (result.returncode == 0) is (expected is not None), result.stderr
+    if expected is None:
+        assert not output.exists()
+    else:
+        assert output.read_text() == f"state={expected}\n"
+    if event == "pull_request":
+        assert request.read_text().splitlines()[:2] == [
+            "api",
+            "repos/example/project/pulls/272",
+        ]
+        assert summary.exists() is (expected is not None)
+    else:
+        assert not request.exists()
 
 
 def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup() -> (
@@ -1434,7 +1556,7 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
                     if job_name == "admit"
                     else "needs.admit.outputs.frontend == 'true'"
                     if job_name in {"static", "behavioral"}
-                    else "github.event.pull_request.draft != true && steps.static-capability.outputs.frontend == 'true'"
+                    else "steps.static-capability.outputs.frontend == 'true'"
                 )
     for command in _make_commands(["check", "merge-check"]):
         assert not full_targets.intersection(command)
@@ -1473,10 +1595,7 @@ def test_static_project_preparation_precedes_observation_without_granting_proof(
         for step in gate_steps
         if step.get("name") == "Independently validate untrusted candidate evidence"
     )
-    assert (
-        request["if"]
-        == "github.event.pull_request.draft != true && needs.verify.outputs.static_project == 'true'"
-    )
+    assert request["if"] == "needs.verify.outputs.static_project == 'true'"
     assert (
         "trusted-base/backend/src/oh_goon/repository_tooling/verification_gate_control.py"
         in preparation["run"]
@@ -1487,7 +1606,7 @@ def test_static_project_preparation_precedes_observation_without_granting_proof(
         < gate_steps.index(preparation)
         < gate_steps.index(final)
     )
-    assert final["if"] == "github.event.pull_request.draft != true"
+    assert "if" not in final
     assert "--prepare-static-project" not in final["run"]
     assert setup["with"]["node-version"] == gate_setup["with"]["node-version"]
 
@@ -1522,14 +1641,16 @@ def test_selected_proof_prepares_the_original_native_python_build_environment(
     assert (
         hosted[hosted.index("--project") + 1] == native[native.index("--project") + 1]
     )
-    assert "--frozen" in hosted and "if" not in preparation
+    assert "--frozen" in hosted
     if job_name == "admit":
+        assert preparation["if"] == "steps.eligibility.outputs.state == 'verify'"
         assert index < next(
             position
             for position, step in enumerate(steps)
             if step.get("id") == "selection"
         )
         return
+    assert "if" not in preparation
     assert index < next(
         position
         for position, step in enumerate(steps)
@@ -1604,7 +1725,8 @@ def test_candidate_admission_passes_mode_and_stops_setup_after_rejection(
     post_admission = tmp_path / "post-admission-setup"
     proof = _workflow()["jobs"]["admit"]
     step = next(value for value in proof["steps"] if value.get("id") == "selection")
-    assert "if" not in step and "continue-on-error" not in step
+    assert step["if"] == "steps.eligibility.outputs.state == 'verify'"
+    assert "continue-on-error" not in step
     # A later setup effect must not start after this real admission step fails.
     command = step["run"] + '\nprintf prepared > "$POST_ADMISSION_SETUP"\n'
     requested_head = "$(touch injected); `touch injected`"
@@ -1660,7 +1782,7 @@ def test_manual_replay_cannot_publish_the_required_merge_check_name() -> None:
     assert _merge_aggregate()["name"] == (
         "${{ github.event_name == 'push' && 'merge-not-applicable'"
         " || github.event_name == 'workflow_dispatch' && 'replay-feedback'"
-        " || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}"
+        " || needs.admit.outputs.eligibility == 'deferred' && 'verification-deferred' || 'merge-gate' }}"
     )
 
 
@@ -1673,9 +1795,7 @@ def test_required_aggregate_rejects_every_non_success_dependency(
 ) -> None:
     aggregate = _merge_aggregate()
     assert "always()" in aggregate["if"]
-    assert "needs." not in aggregate["if"]
     assert "continue-on-error" not in aggregate
-    assert "draft-feedback" in aggregate["name"]
     guards = [
         (step, key)
         for step in aggregate["steps"]
@@ -1713,7 +1833,7 @@ def test_merge_control_uses_only_the_trusted_base_and_keeps_its_failure(
     assert len(steps) == 1
     step = steps[0]
     assert "continue-on-error" not in step
-    assert step["if"] == "github.event.pull_request.draft != true"
+    assert "if" not in step
     assert "${{" not in step["run"]
     checkouts = [
         value["with"]
