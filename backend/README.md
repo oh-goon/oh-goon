@@ -20,8 +20,9 @@ initialization; it is not a prerequisite for installing the environment.
 
 Before submitting a backend change, run focused owner tests and `make -C .. check`.
 The same relevant fast policy supplies hosted proof; complete backend/integration
-portfolios run daily. Add the smallest actual API/DB/process proof needed for
-the changed boundary, with a named reason for any necessary slow exception.
+portfolios run on the full regression schedule. Add the smallest actual
+API/DB/process proof needed for the changed boundary, with a named reason for
+any necessary slow exception.
 
 
 The backend check includes mypy's strict `oh_goon` package selection from

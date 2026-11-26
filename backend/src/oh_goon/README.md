@@ -189,8 +189,8 @@ cli*.py       → unit/entrypoints
 Public FastAPI/OpenAPI changes add generation/freshness and the smallest affected
 consumer proof. Other product changes stay with their affected backend owners.
 Repository tooling uses [its focused loop](../../../scripts/README.md).
-`make check` admits relevant fast checks; complete owners run daily. A critical
-native/lifecycle reproducer remains a named pre-merge obligation.
+`make check` admits relevant fast checks; complete owners run on the full regression
+schedule. A critical native/lifecycle reproducer remains a named pre-merge obligation.
 
 CLI syntax/help changes update their owning documentation. Layout/owner-map
 changes need architecture and focused tooling/protection proof.

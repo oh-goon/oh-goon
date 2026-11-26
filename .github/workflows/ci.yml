@@ -428,7 +428,7 @@ jobs:
           never qualify a merge; missing, cancelled, failed, stale or duplicate proof refuses.
           The existing independent trusted-base merge-gate validates the combined receipt.
           Rerun failed jobs for the same source to retain successful job evidence.
-          Full unrelated/exhaustive regression remains daily, not claimed by this proof.
+          Scheduled full regression covers unrelated and exhaustive checks.
           EOF
   merge-gate:
     name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event_name == 'workflow_dispatch' && 'replay-feedback' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}

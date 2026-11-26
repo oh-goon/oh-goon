@@ -151,13 +151,18 @@ def _aggregate(
 @pytest.mark.parametrize(
     ("instant", "expected"),
     [
-        ("2026-10-30T02:22:59+00:00", "2026-10-29"),
+        ("2026-10-27T02:22:59+00:00", "2026-10-25"),
+        ("2026-10-27T02:23:00+00:00", "2026-10-27"),
+        ("2026-10-30T02:22:59+00:00", "2026-10-27"),
         ("2026-10-30T02:23:00+00:00", "2026-10-30"),
-        ("2026-10-30T23:59:00+00:00", "2026-10-30"),
+        ("2026-11-01T02:22:59+00:00", "2026-10-30"),
+        ("2026-11-01T02:23:00+00:00", "2026-11-01"),
+        ("2026-03-29T04:22:59+02:00", "2026-03-27"),
         ("2026-03-29T04:23:00+02:00", "2026-03-29"),
+        ("2026-10-31T22:23:00-04:00", "2026-11-01"),
     ],
 )
-def test_daily_slot_is_utc_and_not_a_rolling_36_hour_schedule(
+def test_daily_slot_uses_the_tuesday_friday_sunday_utc_schedule(
     instant: str, expected: str
 ) -> None:
     assert daily.daily_slot(datetime.fromisoformat(instant)) == expected
@@ -195,6 +200,121 @@ def test_catch_up_reuses_first_slot_attempt_even_if_main_advanced() -> None:
     assert daily.existing_slot_attempt([current], SLOT, current_run_id=3) is None
     assert daily.existing_slot_attempt([current, first], SLOT, current_run_id=1) is None
     assert daily.existing_slot_attempt([first], "2026-10-31", current_run_id=3) is None
+
+
+def _prepare_campaign(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[dict[str, Any]],
+    current: dict[str, Any],
+    *,
+    mode: str = "daily",
+    slot: str = "",
+    source_sha: str | None = None,
+) -> dict[str, Any]:
+    monkeypatch.setattr(daily, "campaign_runs", lambda repository: rows)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", str(current["run_attempt"]))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    output = tmp_path / "admission.json"
+    assert (
+        daily.main(
+            [
+                "prepare",
+                "--repository",
+                "oh-goon/oh-goon",
+                "--mode",
+                mode,
+                "--slot",
+                slot,
+                "--sha",
+                source_sha or current["head_sha"],
+                "--run-id",
+                str(current["id"]),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    return cast(dict[str, Any], json.loads(output.read_text()))
+
+
+@pytest.mark.parametrize(
+    ("mode", "title_slot", "created_at", "slot", "expected"),
+    [
+        ("daily", "scheduled", "2026-10-28T02:22:59Z", "", "2026-10-27"),
+        ("daily", "scheduled", "2026-10-28T02:23:00Z", "", "2026-10-28"),
+        ("daily", "latest-slot", "2026-10-28T02:23:00Z", "", "2026-10-27"),
+        ("daily", "2026-10-29", "2026-10-30T04:00:00Z", "2026-10-29", "2026-10-29"),
+        ("release", "scheduled", "2026-10-28T02:23:00Z", "", "2026-10-28"),
+        ("release", "2026-10-29", "2026-10-30T04:00:00Z", "2026-10-29", "2026-10-29"),
+    ],
+)
+def test_prepare_preserves_run_title_and_explicit_slot_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    title_slot: str,
+    created_at: str,
+    slot: str,
+    expected: str,
+) -> None:
+    current = _run(2, status="in_progress") | {
+        "display_title": f"{mode}-full | {title_slot} | {SHA}",
+        "created_at": created_at,
+    }
+    rows = [current]
+    if mode == "release":
+        rows.append(_run(1, slot=expected))
+    result = _prepare_campaign(
+        tmp_path, monkeypatch, rows, current, mode=mode, slot=slot
+    )
+    assert result["slot"] == expected
+    assert result["kind"] == "admission"
+    assert result["existing_attempt"] is None
+
+
+@pytest.mark.parametrize("reuse_original", (False, True))
+def test_prepare_coalesces_new_title_with_legacy_attempt_and_keeps_rerun_lineage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_original: bool
+) -> None:
+    legacy = _run(1, slot="2026-10-27") | {
+        "display_title": f"daily-full | scheduled | {SHA}",
+        "event": "schedule",
+        "run_attempt": 2,
+    }
+    current_sha = "b" * 40
+    current = _run(2, slot="2026-10-29", sha=current_sha) | {
+        "display_title": f"daily-full | latest-slot | {current_sha}",
+    }
+    selected = legacy if reuse_original else current
+    result = _prepare_campaign(tmp_path, monkeypatch, [current, legacy], selected)
+    assert result["slot"] == "2026-10-27"
+    assert result["run"] is reuse_original
+    assert result["existing_attempt"] == (None if reuse_original else legacy)
+    assert (result["sha"], result["attempt"]) == (
+        selected["head_sha"],
+        selected["run_attempt"],
+    )
+
+
+def test_dated_older_ref_catch_up_coalesces_existing_latest_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slot = "2026-10-27"
+    prior_sha = "b" * 40
+    prior = _run(1, slot="2026-10-29", sha=prior_sha) | {
+        "display_title": f"daily-full | latest-slot | {prior_sha}",
+    }
+    catch_up = _run(2, sha="c" * 40) | {
+        "display_title": f"daily-full | {slot} | {SHA}",
+    }
+    result = _prepare_campaign(
+        tmp_path, monkeypatch, [catch_up, prior], catch_up, slot=slot, source_sha=SHA
+    )
+    assert result["kind"] == "coalesced" and result["run"] is False
+    assert (result["slot"], result["sha"]) == (slot, SHA)
+    assert result["existing_attempt"] == prior
 
 
 def test_native_failure_can_have_complete_coverage_but_never_satisfies_daily() -> None:
@@ -354,13 +474,12 @@ def test_campaign_preserves_missing_owners_but_rejects_invalid_receipts(
 
 
 def test_latest_red_is_fresh_and_old_green_stays_separate() -> None:
-    previous = _run(1, slot="2026-10-29")
+    previous = _run(1, slot="2026-10-27")
     latest = _run(2, conclusion="failure")
     green = {
         **_aggregate(["first"], [_owner("first")]),
         "run_id": 1,
-        "slot": "2026-10-29",
-        "completed_at": "2026-10-29T04:00:00Z",
+        "slot": "2026-10-27",
     }
     red = {
         **_aggregate(["first"], [_owner("first", code=1)], "failure"),
@@ -370,7 +489,7 @@ def test_latest_red_is_fresh_and_old_green_stays_separate() -> None:
         "completed_at": "2026-10-30T04:00:00Z",
     }
     result = daily.health_summary(
-        [latest, previous], [red, green], now=datetime(2026, 10, 30, 5, tzinfo=UTC)
+        [latest, previous], [red, green], now=datetime(2026, 10, 30, 15, tzinfo=UTC)
     )
     assert result["stale"] is False and result["missed_slot"] is False
     assert result["health"] == "FAIL"
@@ -379,24 +498,81 @@ def test_latest_red_is_fresh_and_old_green_stays_separate() -> None:
 
 
 def test_new_incomplete_attempt_cannot_hide_behind_a_recent_green() -> None:
-    previous = _run(1, slot="2026-10-29")
+    previous = _run(1, slot="2026-10-27")
     latest = _run(2, conclusion="cancelled")
     green = {
         **_aggregate(["first"], [_owner("first")]),
         "run_id": 1,
-        "slot": "2026-10-29",
-        "completed_at": "2026-10-29T04:00:00Z",
+        "slot": "2026-10-27",
     }
     result = daily.health_summary(
-        [latest, previous], [green], now=datetime(2026, 10, 30, 5, tzinfo=UTC)
+        [latest, previous], [green], now=datetime(2026, 10, 30, 15, tzinfo=UTC)
     )
     assert result["latest_attempt_state"] == "INCOMPLETE"
     assert result["latest_complete"]["run_id"] == 1
     assert result["last_green"]["run_id"] == 1
-    missed = daily.health_summary(
-        [previous], [green], now=datetime(2026, 10, 31, 5, tzinfo=UTC)
+    assert result["stale"] is True and result["missed_slot"] is False
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_slot", "missed_slot", "stale"),
+    [
+        ("2026-10-30T02:22:59Z", "2026-10-27", False, False),
+        ("2026-10-30T02:23:00Z", "2026-10-30", True, False),
+        ("2026-10-30T14:22:59Z", "2026-10-30", True, False),
+        ("2026-10-30T14:23:00Z", "2026-10-30", True, True),
+    ],
+)
+def test_scheduled_receipt_stays_fresh_until_the_following_slots_grace_expires(
+    now: str, expected_slot: str, missed_slot: bool, stale: bool
+) -> None:
+    tuesday = _run(1, slot="2026-10-27") | {
+        "display_title": f"daily-full | scheduled | {SHA}",
+        "event": "schedule",
+    }
+    green = {
+        **_aggregate(["first"], [_owner("first")]),
+        "run_id": 1,
+        "slot": "2026-10-27",
+    }
+    result = daily.health_summary([tuesday], [green], now=datetime.fromisoformat(now))
+    assert result["expected_slot"] == expected_slot
+    assert result["missed_slot"] is missed_slot
+    assert result["stale"] is stale
+
+
+@pytest.mark.parametrize(
+    ("other_slot", "now"),
+    [
+        ("2026-10-29", "2026-10-30T05:00:00Z"),
+        ("2026-10-27", "2026-10-30T15:00:00Z"),
+        ("2026-11-01", "2026-10-30T15:00:00Z"),
+    ],
+)
+@pytest.mark.parametrize("current_receipt", (False, True))
+def test_recent_other_slot_receipt_does_not_determine_scheduled_slot_freshness(
+    other_slot: str, now: str, current_receipt: bool
+) -> None:
+    other = _run(1, slot=other_slot) | {
+        "created_at": "2026-10-30T04:20:00Z",
+        "updated_at": "2026-10-30T04:40:00Z",
+    }
+    current = _run(2) | {
+        "display_title": f"daily-full | latest-slot | {SHA}",
+        "event": "schedule",
+    }
+    green = _aggregate(["first"], [_owner("first")])
+    receipts = [green | {"run_id": 1, "slot": other_slot}]
+    if current_receipt:
+        receipts.append(green | {"run_id": 2})
+
+    result = daily.health_summary(
+        [current, other], receipts, now=datetime.fromisoformat(now)
     )
-    assert missed["missed_slot"] is True and missed["stale"] is True
+    assert result["latest_complete"]["run_id"] == 1
+    assert result["expected_slot"] == SLOT
+    assert result["missed_slot"] is False
+    assert result["stale"] is not current_receipt
 
 
 def test_completion_freshness_uses_actions_time_and_rerun_attempt_time() -> None:
@@ -712,7 +888,7 @@ def test_daily_workflow_has_one_unfiltered_frozen_campaign_and_independent_owner
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release-validation.yml").read_text()
     )
-    assert workflow["on"]["schedule"] == [{"cron": "23 2 * * *"}]
+    assert workflow["on"]["schedule"] == [{"cron": "23 2 * * 0,2,5"}]
     assert set(workflow["on"]) == {"schedule", "workflow_dispatch"}
     assert workflow["concurrency"]["cancel-in-progress"] is False
     job = workflow["jobs"]["full-regression"]
@@ -737,7 +913,36 @@ def test_daily_workflow_has_one_unfiltered_frozen_campaign_and_independent_owner
     assert _plan() and len(set(_plan())) == len(_plan())
 
 
-def test_daily_cross_owner_integration_prepares_the_locked_typescript_tools() -> None:
+def test_campaign_uses_selected_source_and_current_catch_up_controller() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-validation.yml").read_text()
+    )
+    campaign = workflow["jobs"]["campaign"]
+    steps = campaign["steps"]
+    source, controller = [
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert source["with"]["ref"] == "${{ inputs.ref || github.sha }}"
+    assert controller["with"]["ref"] == "${{ github.sha }}"
+    source_path, controller_path = source["with"]["path"], controller["with"]["path"]
+    assert source_path != controller_path
+    metadata_root, selected_controller = controller["if"].split(" == ", 1)
+    assert metadata_root.startswith("env.") and selected_controller == repr(
+        controller_path
+    )
+    controller_selection = campaign["env"][metadata_root.removeprefix("env.")]
+    assert "inputs.mode == 'daily'" in controller_selection
+    assert "inputs.ref != ''" in controller_selection
+    assert "inputs.ref != github.sha" in controller_selection
+    bound_source = next(step for step in steps if step.get("id") == "source")
+    admit = next(step for step in steps if step.get("id") == "admit")
+    plan = next(step for step in steps if step.get("id") == "plan")
+    assert bound_source["working-directory"] == plan["working-directory"] == source_path
+    assert bound_source["env"]["REQUESTED_SOURCE_SHA"] == source["with"]["ref"]
+    assert admit["env"]["FROZEN_SOURCE_SHA"] == "${{ steps.source.outputs.sha }}"
+
+
+def test_full_workflow_prepares_node_and_frontend_packages_for_their_owners() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release-validation.yml").read_text()
     )
@@ -755,7 +960,12 @@ def test_daily_cross_owner_integration_prepares_the_locked_typescript_tools() ->
     assert env_reference.startswith("env.") and expected == "'true'"
     frontend_owners = job["env"][env_reference.removeprefix("env.")]
     assert '"test-cross-owner-integration"' in frontend_owners
-    assert install_condition in node_setup["if"].split(" || ")
+    assert '"release-locks-check"' not in frontend_owners
+    assert '"check-generated"' not in frontend_owners
+    node_conditions = node_setup["if"].split(" || ")
+    assert install_condition in node_conditions
+    assert "matrix.target == 'release-locks-check'" in node_conditions
+    assert "check-generated" not in node_setup["if"]
     assert job["steps"].index(node_setup) < job["steps"].index(frontend_install)
 
 

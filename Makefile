@@ -88,7 +88,7 @@ help:
 	  '' \
 	  'Golden change loops (stop on first failure):' \
 	  '  changed behavior: focused test -> make check -> required merge-gate' \
-	  '  make test/check: relevant fast feedback; complete portfolios run daily' \
+	  '  make test/check    Run relevant fast checks. Complete portfolios run on schedule.' \
 	  '  make merge-check: exact change admission + trusted-base merge control' \
 	  '  make broad-diagnostic: explicit broad local diagnostic' \
 	  '' \
@@ -603,7 +603,7 @@ test-backend-integration:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --member-timeout tests/integration/services/test_run_storage_retention.py::test_one_hundred_real_run_storage_retention=900 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-cross-owner-integration:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --member-timeout 'tests/integration/test_scheduled_iris_example.py::test_scheduled_iris_uses_real_clock_and_retained_canonical_runs[two-real-clock-occurrences]=240' --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-python-projects:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks $(if $(OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY),--report-directory "$(OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY)" --continue-independent,)
