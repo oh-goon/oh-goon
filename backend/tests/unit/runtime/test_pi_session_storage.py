@@ -616,18 +616,31 @@ def test_retained_pi_file_reopens_and_records_a_new_digest_of_the_same_inode(
         ("removed", PiSessionUnavailable),
         ("replaced", PiSessionIdentityMismatch),
         ("edited", PiSessionHistoryUnqualified),
+        ("hardlink", PiSessionHistoryUnqualified),
+        ("symlink", PiSessionHistoryUnqualified),
         ("extra", PiSessionHistoryUnqualified),
         ("legacy", PiSessionHistoryUnqualified),
     ],
 )
 def test_exact_reopen_refuses_changed_or_unproven_original_file(
-    admitted_pi_scope: _AdmittedScope, change: str, failure: type[PiSessionUnavailable]
+    admitted_pi_scope: _AdmittedScope,
+    tmp_path: Path,
+    change: str,
+    failure: type[PiSessionUnavailable],
 ) -> None:
-    original = b"retained\n"
+    entry: dict[str, object] = {
+        "type": "message",
+        "id": "original-leaf",
+        "parentId": None,
+        "message": {"role": "user", "content": [{"type": "text", "text": "original"}]},
+    }
+    original = _NATIVE_SESSION_HEADER + encode_pi_session_entry(entry)
+    edited = original.replace(b'"text":"original"', b'"text":"modified"')
+    external = tmp_path / "external-session.jsonl"
     with admitted_pi_scope.create() as new:
         session = new.path / PI_SESSION_NEW_FILE.name
         session.write_bytes(original)
-        receipt = observe_pi_session_file(new, session.name)
+        receipt = observe_pi_session_file(new, session.name, _native_save(entry))
     if change == "removed":
         session.unlink()
     elif change == "replaced":
@@ -636,8 +649,19 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         replacement.replace(session)
     elif change == "edited":
         before = session.stat()
-        session.write_bytes(b"tampered\n")
+        session.write_bytes(edited)
         os.utime(session, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = session.stat()
+        assert (after.st_ino, after.st_size, after.st_mtime_ns) == (
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+    elif change == "hardlink":
+        external.hardlink_to(session)
+    elif change == "symlink":
+        session.rename(external)
+        session.symlink_to(external)
     elif change == "extra":
         (session.parent / "models.json").write_bytes(b"unexpected template bytes\n")
     else:
@@ -650,7 +674,11 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         pytest.fail("Unproven retained Pi bytes acquired writer custody")
     if change == "removed":
         assert not session.exists()
-    if change == "extra":
+    elif change == "edited":
+        assert session.read_bytes() == edited
+    elif change in {"hardlink", "symlink"}:
+        assert session.samefile(external) and external.read_bytes() == original
+    elif change == "extra":
         assert session.read_bytes() == original
         assert (session.parent / "models.json").read_bytes() == b"unexpected template bytes\n"
     assert set(admitted_pi_scope.layout.pi_sessions.iterdir()) == {session.parent}
