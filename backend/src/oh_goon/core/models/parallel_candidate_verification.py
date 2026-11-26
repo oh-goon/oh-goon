@@ -12,6 +12,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.product_identity import stable_id
 
 VERIFIER_STEP_ID = "verify-1"
+BASELINE_VERIFIER_STEP_ID = "verify-base"
 VERIFIER_INPUT_ROOT = PurePosixPath("/oh-goon-verifier/input")
 VERIFIER_SOURCE_ROOT = PurePosixPath("/oh-goon-verifier/source")
 
@@ -19,6 +20,11 @@ VERIFIER_SOURCE_ROOT = PurePosixPath("/oh-goon-verifier/source")
 def is_parallel_verifier_step_id(step_id: str) -> bool:
     """Recognize the authored verifier leaf in its resolved Goon occurrence."""
     return step_id.rsplit(".", 1)[-1] == VERIFIER_STEP_ID
+
+
+def is_baseline_verifier_step_id(step_id: str) -> bool:
+    """Recognize the receiving-source verification before the first Agent write."""
+    return step_id.rsplit(".", 1)[-1] == BASELINE_VERIFIER_STEP_ID
 
 
 def _bounded_text(value: str, *, maximum: int) -> str:

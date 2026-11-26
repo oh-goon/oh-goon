@@ -368,9 +368,7 @@ class FleetPlanRunner:
             workspace_materialization=candidate.materialization,
             workspace_directory_fd=candidate.workspace_directory_fd,
             require_candidate_current=candidate.require_current,
-            candidate_verifier=candidate.verifier
-            if target.candidate_workspace.parallel_work_id is not None
-            else None,
+            candidate_verifier=candidate.verifier,
         )
         result = FleetPlanResult(plan_id=target.plan.plan_id, steps=execution.steps)
         receipt = candidate.settle(result)

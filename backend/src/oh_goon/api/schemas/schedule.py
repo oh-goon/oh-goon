@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from oh_goon.core.models.branch_advance import BranchAdvanceId
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+from oh_goon.core.models.writable_schedule import WritableScheduleTasks
 from oh_goon.core.vocabulary import ScheduleState
 
 
@@ -8,6 +10,23 @@ class ScheduleRunRequest(BaseModel):
     schedule_run_id: str = Field(min_length=1)
     expected_generation_id: str = Field(min_length=1)
     expected_record_version: int = Field(ge=0)
+
+
+class RetainedReviewScheduleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fleet_run_id: str = Field(min_length=1, max_length=160)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    interval_minutes: int = Field(ge=1, le=10080)
+
+
+class WritableScheduleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seed_advance_id: BranchAdvanceId
+    tasks: WritableScheduleTasks
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    interval_minutes: int = Field(ge=1, le=10080)
 
 
 class SharedPlanScheduleCreateRequest(BaseModel):

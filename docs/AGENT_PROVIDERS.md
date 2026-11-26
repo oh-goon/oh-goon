@@ -162,9 +162,11 @@ oh-goon ai --agent pi --profile pi-rpc --session new --prompt-file task.txt
 The claimed Step reserves the writer in the original Journal before giving Pi
 its private directory. Read the reservation and any session-file observation
 with `oh-goon runs events RUN_ID --after 0 --json`. A reservation alone leaves
-the write unconfirmed. A qualified save matches Pi's final entries to the
-pinned file and synchronizes the file and its directory after the original
-process settles. A missing or incomplete save reports unknown persistence.
+the write unconfirmed. Pi can report a session ID and exit before a
+conversation creates any file. The first user message can be saved even
+when the first model turn fails. A qualified save matches Pi's final entries
+to the pinned file and synchronizes the file and its directory after the
+original process settles. A missing or incomplete save reports unknown persistence.
 The Run keeps its own outcome and verification results. New-session Runs require a fresh task, with the built-in managed
 configuration and a serial runtime. Candidate workspaces, repair campaigns,
 Step resource caps, custom native arguments and configuration, and Run replay
@@ -205,9 +207,13 @@ Pi verifies the exact native session and active leaf before receiving the
 new task. The continuing Agent has the
 built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
 mount. The writer receives only the selected private session file. The
-original Journal records the predecessor and fences a second writer. A failed
-or interrupted reservation may leave the lineage unavailable for another
-reopen. Read the recorded session, cleanup, and independent verifier evidence with
+original Journal records the predecessor and fences a second managed writer.
+Same-user processes outside the Run can still edit the file. Oh-Goon checks
+the exact saved bytes before launch and the predecessor prefix plus Pi's
+reported append after the writer exits. A detected change leaves the save
+unqualified. A failed or interrupted reservation may leave the lineage
+unavailable for another reopen. Read the recorded session, cleanup, and
+independent verifier evidence with
 `runs handoff`, `runs outputs`, `runs events`, or `runs tape`. Persistent
 `ai --json` returns the same bounded handoff as `runs handoff --json`.
 A history read uses the recorded evidence from the selected runtime.
@@ -364,6 +370,15 @@ canonical cancellation receipt. Duration is unavailable when no process launched
 The reusable handoff view bounds source admissions, Steps and claim excerpts and
 reports every projection omission. Full recorded facts remain in the original
 Run events and Game Tape; transient raw output may be unavailable.
+
+For a passed native report Step with a settled successful conversation,
+`runs handoff --json` can include `final_advisory` on the final event in
+`recorded_steps.steps[].native_claims[].events`. The field contains redacted
+`text` capped at 512 characters and an `omitted_characters` count. Read this
+field directly when consuming advice. An absent field means no typed advice
+was recorded. The field carries the surrounding untrusted claim authority.
+Step settlement, cleanup, and independent verification retain their own
+recorded evidence.
 
 `runs feedback` returns the canonical bounded feedback also exposed by the Run
 API and existing Game Tape/campaign views. It binds the original Run, accepted
@@ -564,7 +579,8 @@ scope described above. The request selects an explicit work ID, a clean register
 workspace and expected Git commit, two briefs for the same task, two headless Pi
 profiles, native budgets, note access, and an independent verifier. The CLI waits
 for the original Runs. Use the same request to inspect an uncertain launch
-acknowledgement by its original identity.
+acknowledgement by its original identity. Give each newly approved round its own
+work ID so its candidates, notes and verifier results remain attributable.
 
 The request requires `work_id`, `workspace`, `expected_base_revision`, `task`,
 `briefs` (two distinct strings), `native_profiles` (two profile names),
@@ -579,6 +595,7 @@ can select `["-I", "{input:verify.py}", "{candidate}"]`.
 
 ```sh
 oh-goon runs parallel-work WORK_ID --json
+oh-goon runs parallel-work WORK_ID --wait-seconds 120 --json
 oh-goon runs parallel-notes WORK_ID --after 0 --json
 oh-goon runs cancel-parallel WORK_ID --run RUN_ID
 oh-goon runs verify-candidate RUN_ID --json
@@ -594,6 +611,117 @@ shows publication and delivery metadata. The verifier and the original Run
 determine candidate eligibility. An export creates a fresh file for the selected
 checkpoint and preserves the operator's checkout and refs.
 [Parallel agent work requirements](development/PARALLEL_AGENT_WORK_REQUIREMENTS.md)
+
+The bounded wait observes the original task through read-only state. It returns
+the work record and a `terminal` or `timed_out` status. Timeout exits with
+`EVIDENCE_UNAVAILABLE` and preserves the last readback. A terminal non-success
+returns that outcome. Interrupting the wait leaves the original Runs with their
+controller. Check candidate custody and verification before launching another
+round or advancing a branch.
+
+#### Share reviewed context and continue on a named branch
+
+Select the notes useful for the next task explicitly:
+
+```sh
+oh-goon runs parallel-notes WORK_ID --export-note 2 --export-note 5 \
+  --output /private/shared-task/peer-context.md
+```
+
+The output directory must already exist outside the recorded source and runtime
+state. The command publishes a new private Markdown file with the original task,
+base, source and author provenance and selected operator-redacted bodies. Read
+the document before sharing it. Keep credentials, raw transcripts, private
+working files and general Run exports in their original scopes. Give peer
+agents the reviewed document through an explicitly selected Skill resource
+when preparing their next Run. It supplies attributed context, and the
+receiving Run captures its own source and verification authority.
+
+To keep work on a named branch, start from the exported candidate's exact Git
+base in a clean, separate clone. Inspect the export receipt and verify the
+patch SHA-256 before applying it. Use native Git in that clone:
+
+```sh
+git -C /private/agent-clone switch -c agents/approach-a BASE_COMMIT
+git -C /private/agent-clone apply --check --index /private/candidate.patch
+git -C /private/agent-clone apply --index /private/candidate.patch
+git -C /private/agent-clone diff --cached --check
+```
+
+Run the task acceptance checks on the resulting source and commit the reviewed
+changes on the agent branch. Prepare the next task and reviewed Skill locally,
+then select the receiving clone's registered root, existing branch and full
+commit for a fresh candidate Run:
+
+```sh
+oh-goon ai --agent pi --profile isolated-managed --config /private/providers.json \
+  --workspace /private/agent-clone --candidate \
+  --expect-branch agents/approach-a --expect-head REVIEWED_COMMIT \
+  --skill /private/shared-task/review-skill --prompt-file /private/next-task.txt
+```
+
+The expected branch and commit are checked before allocating the candidate and
+again by the workspace owner before Git registers the detached worktree. A
+switch to another branch at the same commit refuses admission. Repeat acceptance
+on the new output before advancing the branch. The named branch remains with
+the operator's clone. The detached candidate and its verification receipt stay
+with their original Run. Another environment requires an explicit source
+transfer and fresh admission under its tool and model policy.
+
+| Audience | Material |
+| --- | --- |
+| Active peers on the same task | Short findings, questions, interface decisions, failed approaches and attributed references through the scoped note tools. |
+| A later Run or another authorized environment | Operator-selected notes captured as a reviewed Skill resource. If advancing source, transfer the reviewed Git commit and explicitly selected patch or verification evidence. |
+| Original owner and authorized reviewers | Raw transcripts, provider state and credentials, full working files, original verification logs and worker custody evidence. |
+
+For repeated read-only reviews of one captured repository source, use the
+[existing Schedule owner](AUTOMATION_MODEL.md#recurring-native-reviews).
+
+#### Advance a local agent branch and start a writable round
+
+Select a dedicated bare local Git repository with an existing agent branch and a
+separate registered clone checked out, detached and clean, at the same commit.
+Use a receiving clone separate from the original parallel task's checkout. The
+bare repository owns the named branch. The receiving clone supplies the source
+for fresh detached candidates. Use the same local Oh-Goon state for the original
+verification, branch receipt and successor Runs.
+
+```sh
+oh-goon runs advance-candidate VERIFIED_RUN_ID \
+  --advance-id approach-a-001 --checkpoint-id VERIFIED_CHECKPOINT_ID \
+  --branch-owner /private/agent-branches.git --workspace /private/agent-checkout \
+  --branch-ref refs/heads/agents/approach-a --expected-tip PREVIOUS_COMMIT \
+  --authorize --json
+
+oh-goon runs branch-advance approach-a-001 --json
+
+oh-goon runs start-round approach-a-001 --profile isolated-managed \
+  --config /private/providers.json --prompt-file /private/next-task.txt \
+  --skill /private/shared-task/review-skill --authorize --json
+```
+
+Branch advancement prepares an exact verified Git tree and records its new commit
+before changing the ref. Git moves the branch from the expected tip and writes
+the publication witness in one transaction. After an interrupted command,
+inspect its advancement ID or retry the exact request. Conflicting requests and
+an externally moved ref are refused. A prepared receipt remains available for
+inspection until its publication can be confirmed.
+
+Starting the next round binds one authored task and native selection to one
+durable Run ID, synchronizes the receiving clone to the confirmed commit, and
+checks its exact source. The new Run executes the original frozen verifier on
+that source before the fresh Pi session can edit its candidate. The same verifier
+checks the resulting candidate independently. Inspect `runs verify-candidate`
+for the exact result. A passing successor can advance the same branch with a new
+advancement ID and the previous receipt's commit as the expected tip.
+
+To select approved tasks and advance between them on a wall-clock interval,
+reserve the initial published receipt in the existing Schedule before starting
+its successor. [Scheduled writable rounds](AUTOMATION_MODEL.md#scheduled-writable-rounds)
+
+To continue on a different host, transfer the selected Git ref and reviewed
+task documents, then establish a fresh local seed on the receiving host.
+[Offline host handoff](AUTOMATION_MODEL.md#move-scheduled-writable-work-to-another-host)
 
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,

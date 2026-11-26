@@ -288,6 +288,10 @@ def test_schedule_admission_captures_definition_and_safety_cut_in_same_transacti
             assert schedule_id == definition.schedule_id
             return definition
 
+        def writable_policy_in(self, connection, generation_id: str) -> None:
+            assert connection is auditor.connection
+            assert generation_id == definition.generation_id
+
     class Safety:
         def admit_cut(self, cut):
             assert cut is marker

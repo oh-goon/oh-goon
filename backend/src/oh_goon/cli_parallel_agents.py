@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -79,6 +80,43 @@ def _work_exit_status(result: ParallelAgentWorkReadback) -> int:
     return 0 if all(child.outcome is FleetRunOutcome.SUCCESS for child in result.children) else 1
 
 
+def _watch_work(args: argparse.Namespace) -> int:
+    seconds = args.wait_seconds
+    if not 1 <= seconds <= 86_400:
+        raise FleetPlanInvalid("Parallel work wait requires 1 to 86400 seconds")
+    database = _existing_database()
+    deadline = time.monotonic() + seconds
+    while True:
+        result = read_parallel_work(database, args.work_id)
+        terminal = result.dispatch_closed and all(
+            child.dispatch == "never_started"
+            or (child.status is not None and child.status.terminal)
+            for child in result.children
+        )
+        remaining = deadline - time.monotonic()
+        if terminal or remaining <= 0:
+            break
+        time.sleep(min(remaining, 0.25))
+
+    if args.as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.parallel-work-wait/v1",
+                    "status": "terminal" if terminal else "timed_out",
+                    "work": result.model_dump(mode="json"),
+                }
+            )
+        )
+    else:
+        _print_work(result, as_json=False)
+        if not terminal:
+            print("Wait elapsed before terminal readback. Original work may still be active.")
+    return _work_exit_status(result) if terminal else 3
+
+
 def _start(args: argparse.Namespace) -> int:
     from oh_goon.cli_ai import resolve_native_cli_selection
     from oh_goon.services.fleet_plan_candidate import workspace_control_git
@@ -148,12 +186,16 @@ def run_parallel_agent_command(args: argparse.Namespace) -> int:
     try:
         if args.runs_command == "start-parallel":
             return _start(args)
+        if args.runs_command in {"advance-candidate", "branch-advance", "start-round"}:
+            return _branch_command(args)
         if args.runs_command == "cancel-parallel":
             result = cancel_parallel_work(
                 _existing_database(write=True), args.work_id, fleet_run_id=args.fleet_run_id
             )
         elif args.runs_command == "parallel-notes":
             return _notes_command(args)
+        elif args.wait_seconds is not None:
+            return _watch_work(args)
         else:
             result = read_parallel_work(_existing_database(), args.work_id)
         _print_work(result, as_json=args.as_json)
@@ -168,12 +210,117 @@ def run_parallel_agent_command(args: argparse.Namespace) -> int:
         return 2
 
 
+def _branch_command(args: argparse.Namespace) -> int:
+    from oh_goon.runtime.branch_advances import BranchAdvanceStore
+    from oh_goon.services.branch_advance import BranchAdvanceRequest, advance_verified_candidate
+
+    if args.runs_command == "advance-candidate":
+        request = BranchAdvanceRequest(
+            advance_id=args.advance_id,
+            fleet_run_id=args.fleet_run_id,
+            checkpoint_id=args.checkpoint_id,
+            branch_owner=args.branch_owner,
+            workspace=args.workspace,
+            branch_ref=args.branch_ref,
+            expected_tip=args.expected_tip,
+        )
+        database = _existing_database(write=True)
+        runtime = ApplicationRuntime.build(standard_local=True, startup_purpose="workflow")
+        try:
+            receipt = advance_verified_candidate(
+                request, database=database, repositories=runtime.repositories
+            )
+        finally:
+            runtime.shutdown()
+    else:
+        observed = BranchAdvanceStore(_existing_database()).find(args.advance_id)
+        if observed is None:
+            raise StateConflict("Unknown branch advancement")
+        receipt = observed
+        if args.runs_command == "start-round":
+            if receipt.published_at is None:
+                raise StateConflict("Next Run requires a confirmed branch advancement")
+            return _start_round(args, receipt.preparation.repository_path)
+    if args.as_json:
+        print(receipt.model_dump_json())
+    else:
+        prepared = receipt.preparation
+        state = "Published" if receipt.published_at is not None else "Prepared"
+        print(f"{state} {prepared.advance_id} · {prepared.branch_ref} · {prepared.commit}")
+        if receipt.next_run is not None:
+            print(f"Next Fleet Run ID: {receipt.next_run.fleet_run_id}")
+    return 0
+
+
+def _start_round(args: argparse.Namespace, workspace: Path) -> int:
+    import json
+
+    from oh_goon.cli_ai import _task, resolve_native_cli_selection
+    from oh_goon.cli_result import CliTermination
+    from oh_goon.core.models.agent_providers import PiSessionIntent
+
+    task = _task(args)
+    skill = args.skill.expanduser().absolute() if args.skill is not None else None
+    selected, isolation, git = resolve_native_cli_selection(
+        agent="pi",
+        profile=args.profile,
+        workspace=workspace,
+        config_file=args.config,
+        session=PiSessionIntent(mode="ephemeral"),
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=isolation, git_service=git
+    )
+    try:
+        run = runtime.plans.start_writable_round(
+            advance_id=args.advance_id,
+            selected=selected,
+            workspace=workspace,
+            skill=skill,
+            task=task,
+        )
+        print(f"Fleet Run ID: {run.fleet_run_id}", file=sys.stderr)
+        try:
+            detail = runtime.runs.wait_for_terminal(run.fleet_run_id)
+        except KeyboardInterrupt as interruption:
+            runtime.runs.cancel(run.fleet_run_id)
+            runtime.runs.wait_for_terminal(run.fleet_run_id)
+            return 143 if isinstance(interruption, CliTermination) else 130
+        result = {
+            "advance_id": args.advance_id,
+            "fleet_run_id": run.fleet_run_id,
+            "status": detail.run.status.value,
+            "outcome": detail.outcome.value,
+        }
+        if args.as_json:
+            print(json.dumps(result))
+        else:
+            print(f"{detail.run.status.value} · {detail.outcome.value}")
+        return 0 if detail.outcome is FleetRunOutcome.SUCCESS else 1
+    finally:
+        runtime.shutdown()
+
+
 def _notes_command(args: argparse.Namespace) -> int:
     import json
 
     from oh_goon.runtime.agent_notes import AgentNotesStore
     from oh_goon.runtime.journal import Journal
+    from oh_goon.services.parallel_note_export import export_parallel_notes
 
+    if (args.export_note is None) != (args.output is None):
+        raise FleetPlanInvalid("Note export requires --export-note and --output")
+    if args.export_note is not None:
+        if any(value is not None for value in (args.after, args.receipt_run, args.request_id)):
+            raise FleetPlanInvalid("Note export cannot use paging or receipt selectors")
+        result = export_parallel_notes(
+            _existing_database(), args.work_id, tuple(args.export_note), args.output
+        )
+        if args.as_json:
+            print(json.dumps(result))
+        else:
+            print(f"Exported selected notes to {json.dumps(result['destination'])}")
+        return 0
     database = _existing_database()
     read_parallel_work(database, args.work_id)
     notes = AgentNotesStore(database, Journal(database))
@@ -185,7 +332,7 @@ def _notes_command(args: argparse.Namespace) -> int:
             raise StateConflict("Exact note publication receipt is unavailable")
         print(receipt.model_dump_json())
         return 0
-    page = notes.read_page(args.work_id, args.after)
+    page = notes.read_page(args.work_id, args.after if args.after is not None else 0)
     if args.as_json:
         print(
             json.dumps(

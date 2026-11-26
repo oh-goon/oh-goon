@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_repair import AgentRepairContext
+from oh_goon.core.models.branch_advance import is_branch_round_run_id
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.execution_materialization import ExecutionMaterialization
@@ -274,13 +275,16 @@ class FleetPlanRunExecutor:
             and workspace_materialization is None
         ):
             raise FleetPlanInvalid("Candidate execution has no current materialization")
-        parallel_work_id = (
-            execution_target.candidate_workspace.parallel_work_id
-            if execution_target is not None and execution_target.candidate_workspace is not None
-            else None
+        candidate = execution_target.candidate_workspace if execution_target is not None else None
+        baseline = None
+        if candidate is not None and is_branch_round_run_id(candidate.fleet_run_id):
+            source = candidate.source.source_snapshot
+            baseline = SnapshotIdentity(source.sha256, source.byte_count, source.entry_count)
+        requires_verifier = candidate is not None and (
+            candidate.parallel_work_id is not None or baseline is not None
         )
-        if (parallel_work_id is None) != (candidate_verifier is None):
-            raise FleetPlanInvalid("Parallel verifier does not match the original candidate Run")
+        if requires_verifier != (candidate_verifier is not None):
+            raise FleetPlanInvalid("Frozen verifier does not match the original candidate Run")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
         selected = plan.native_agent
@@ -323,6 +327,7 @@ class FleetPlanRunExecutor:
             workspace_directory_fd=workspace_directory_fd,
             require_candidate_current=require_candidate_current,
             candidate_verifier=candidate_verifier,
+            candidate_baseline=baseline,
         )
         if not any(getattr(step, "project_source", None) is not None for step in plan.steps):
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)

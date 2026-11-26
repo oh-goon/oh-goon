@@ -71,6 +71,36 @@ Existing installed evidence retains its original environment and mode scope.
 | Codex 0.164.0, GPT-6.1 Sol at low effort, [live coding][codex-live-tests] | **PASS**, one full-stdin baseline and one task-only candidate through the original local Run and existing native sign-in. Both edit the inclusive-range sample and pass two unchanged independent verifiers with verified cleanup. Privileged payloads remain intact; stdin changes from 8,109 to 530 bytes. This is bounded coding equivalence, without a token-cost, refresh, private-store or universal model-quality claim. See [issue #22](https://github.com/oh-goon/oh-goon/issues/22). |
 | Codex 0.164.0, [managed review][codex-managed-tests] | **PASS**, three local-fixture entrypoints: original native Run, initialized catalog Plan and initialized catalog Goon, preserving the selected source/tool boundary and complete typed review. No live-account or model-quality qualification. |
 
+The recurring native review uses the public Pi 1.3.0 release entrypoint on Linux
+with Bubblewrap 0.11.1 and a controlled Chat Completions endpoint. **Retain**
+the ephemeral `--no-session` selection, managed broker disclosure,
+typed review parsing and original Step settlement. The public CLI and API proof
+uses two wall-clock occurrences across an app restart. Each reopens the exact
+approved source and captured Skill in a separate Run and Step process. Peer notes
+stay on their existing task-scoped tools, and a selected Markdown export adds no
+native extension. Other hosts, persistent sessions and live models need their
+own evidence. [Scheduled review proof](../../backend/tests/integration/services/test_native_review_schedule_cli.py) · [Live note proof](../../backend/tests/integration/services/test_native_parallel_agent_notes.py)
+
+**Retain** the same ephemeral Pi, managed broker and workspace isolation
+adaptations for writable branch rounds. The dedicated native Git owner publishes
+the verified commit before fresh Fleet admission. The original Step lifecycle
+checks the receiving source before the Agent starts and checks the candidate
+afterward. No native session or tool configuration crosses the handoff.
+[Installed writable round proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
+**Retain** those adaptations for a timed writable Schedule. The selected task
+enters the same branch publication and Fleet admission path as a writable
+round. The installed Pi test exercises two timed tasks against a controlled
+local provider and reopens state after interrupted publication and admission.
+[Writable Schedule restart proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
+**Retain** the same native adaptations for an offline branch handoff. The
+receiving runtime recaptures the imported Git source and establishes its own
+verification, model connection and Schedule. The installed rehearsal uses two
+separate local state roots and restarts the receiving app process. A second
+physical host needs its own runtime evidence.
+[Offline handoff proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
 ## Frozen context continuity — 2026-11-05
 
 [HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths
@@ -1143,6 +1173,35 @@ controlled Linux Bubblewrap workload. The installed proof uses the managed Pi
 1.3.0 profile. Custom persistent extensions and other host environments remain
 outside this qualification.
 
+### Unmanaged Pi session writers — HUG-135
+
+**Disposition**. Retain the original Journal writer reservation and the
+descriptor-bound storage checks. The reservation fences admitted Oh-Goon
+writers. A same-user process outside the Run can still write the native file.
+Oh-Goon checks mount topology visible to the worker and requires one owned
+regular file at the selected path.
+
+Before launching a continuation, Oh-Goon verifies the retained file identity
+and exact byte receipt. Pi confirms the native session and active leaf before
+the prompt. A valid edit can keep both native identifiers and the same inode
+while changing model-visible history. The byte check refuses those changed
+bytes before native launch.
+
+After the continuing process exits and its descendants settle, Oh-Goon
+verifies the retained predecessor prefix and the entries Pi reports appending.
+A changed prefix leaves persistence unknown. The original Run and the
+continuing Run keep their own Agent and verifier results. The lineage cannot
+reopen from that unqualified save. These checks cover the bytes at the named
+checkpoints. Continuous exclusion, attribution to a specific process, and
+transient changes restored between checks remain unqualified.
+
+The [installed Pi journeys](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+use a separate same-user process to change a saved message before launch and
+during a claimed continuation. The [storage cases](../../backend/tests/unit/runtime/test_pi_session_storage.py)
+cover in-place edits, symlink and hardlink aliases, and the worker's bind-mount
+topology checks. The [Journal cases](../../backend/tests/unit/runtime/test_pi_session_writer.py)
+retain the stale-callback and managed-writer fences.
+
 ### Exact read-only Pi reopen — HUG-43
 
 **Disposition: retain** the Pi 1.3.0 RPC relay, managed inference bootstrap,
@@ -1212,6 +1271,29 @@ an attention-required outcome, a failed Agent Step, verified descendant
 cleanup, and an unstarted verifier. Fresh CLI readback preserves these
 facts and reports unknown session persistence. Continuation is refused,
 the bytes remain intact, and the tool effect occurs once. Power-loss
+durability remains unqualified.
+
+### Pi first-message session birth — HUG-134
+
+**Disposition**. Retain Pi 1.3.0's lazy file creation, the original claimed
+Run writer reservation, and the existing Pi save receipt. Pi can report
+a session ID, path, and setup entries while the selected file is still
+absent. The first user message can create the file before the provider
+returns a result. Native creation and close establish the file's physical
+state. Oh-Goon separately checks the correlated final entries and
+synchronizes the exact file and directory before recording its receipt.
+
+The [installed native probes][pi-session-tests] stop Pi by normal close and
+by cancellation before the first message. Both leave the session directory
+empty. The managed CLI rejects an empty prompt before opening application
+state. The [claimed Run cases](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+hold the first provider request and witness the user message on disk under
+the original writer reservation. A failed first turn can retain synchronized
+bytes while the Agent Step fails and its verifier stays unstarted. The
+managed reopen still requires an accepted original Agent result. A successful
+Run reopens the qualified save in a fresh Pi process. A crash after the first
+append preserves the unresolved slot under existing recovery
+and refuses continuation. Neither cut grants replay, and power-loss
 durability remains unqualified.
 
 ### Fresh Pi context after exact reopen — HUG-77

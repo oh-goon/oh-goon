@@ -174,7 +174,7 @@ process and isolation edits retain their smallest necessary real boundary proof.
 A specific critical slow reproducer may be required with its named reason.
 Changing a daily corpus does not automatically execute every parameter, but
 changed test logic must execute meaningfully. Collection alone is insufficient.
-Complete unrelated/exhaustive coverage runs once daily. Use `make broad-diagnostic`
+Scheduled full regression covers unrelated/exhaustive checks. Use `make broad-diagnostic`
 or a complete owner gate only for an explicit broader diagnosis; use
 `make release-check` for complete portable qualification. APP/browser/native
 certification keeps its existing separately selected authority.
@@ -182,7 +182,7 @@ certification keeps its existing separately selected authority.
 Publish one coherent PR after focused proof, fix the first actual failure, then
 mark it ready for the fast required gate. Merge/close only through the authorized
 repository workflow and continue to the next issue without waiting for unrelated
-daily work. The [CI contract](CI_CD_CONTRACT.md#repository-checks-on-github) owns
+scheduled full regression. The [CI contract](CI_CD_CONTRACT.md#repository-checks-on-github) owns
 manual replay, daily catch-up and safe protection cutover. No per-PR benchmark
 report or separate test-selection manifest is required. Use existing timestamps
 and native receipts for provisional timing and scope evidence.

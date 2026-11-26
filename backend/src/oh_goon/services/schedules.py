@@ -7,6 +7,7 @@ from oh_goon.core.errors import (
     RuntimeSafetyBlocked,
     RuntimeSafetyStale,
     ScheduleExecutionActive,
+    ScheduleExecutionStale,
     ScheduleNotFound,
     StateConflict,
 )
@@ -21,6 +22,7 @@ from oh_goon.core.models.schedule import (
     ScheduleStatus,
 )
 from oh_goon.core.models.schedule_execution import FailedScheduleRun, ScheduleRunRecord
+from oh_goon.core.models.writable_schedule import WritableScheduleTask, writable_schedule_run_id
 from oh_goon.core.product_identity import new_schedule_run_id
 from oh_goon.core.vocabulary import (
     ScheduleOccurrenceFilter,
@@ -30,9 +32,10 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.runtime_safety import RuntimeSafetyService
-from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner
+from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner, next_writable_round
 from oh_goon.services.schedule_execution import ScheduleExecutionEngine
 from oh_goon.services.schedule_timing import schedule_timing_decision
+from oh_goon.services.schedule_writable_rounds import WritableScheduleRounds
 
 
 class ScheduleService:
@@ -44,6 +47,8 @@ class ScheduleService:
         engine: ScheduleExecutionEngine,
         admission: ScheduleAdmissionPlanner,
         runtime_safety: RuntimeSafetyService,
+        *,
+        writable_rounds: WritableScheduleRounds | None = None,
     ) -> None:
         self._database = database
         self._definitions = definitions
@@ -51,6 +56,7 @@ class ScheduleService:
         self._engine = engine
         self._admission = admission
         self._runtime_safety = runtime_safety
+        self._writable_rounds = writable_rounds
 
     def catalog(self) -> ScheduleCatalog:
         with self._database.transaction() as c:
@@ -63,6 +69,25 @@ class ScheduleService:
     def create_prepared(self, schedule_id: str, request: ScheduleCreate) -> ScheduleDefinition:
         """Persist a Schedule whose execution target was prepared by an execution-entry owner."""
         return self._definitions.create(schedule_id, request)
+
+    def create_writable_rounds(
+        self,
+        schedule_id: str,
+        *,
+        seed_advance_id: str,
+        tasks: tuple[WritableScheduleTask, ...],
+        interval_minutes: int,
+        name: str | None = None,
+    ) -> ScheduleDefinition:
+        if self._writable_rounds is None:
+            raise InvalidRequest("Writable Schedule creation requires its selected native runtime")
+        return self._writable_rounds.create(
+            schedule_id,
+            seed_advance_id=seed_advance_id,
+            tasks=tasks,
+            interval_minutes=interval_minutes,
+            name=name,
+        )
 
     def replace_preserving_authority(
         self, schedule_id: str, request: ScheduleReplace
@@ -168,21 +193,46 @@ class ScheduleService:
             if scheduled is None:
                 continue
             plan, _ = scheduled
+            writable = plan.intent.writable_round
+            occurrence_id = (
+                new_schedule_run_id()
+                if writable is None
+                else writable_schedule_run_id(
+                    plan.intent.definition_generation_id, writable.task_index
+                )
+            )
             try:
-                self._engine.start(plan, schedule_run_id=new_schedule_run_id())
-            except (ScheduleExecutionActive, RuntimeSafetyBlocked, RuntimeSafetyStale):
+                self._engine.start(plan, schedule_run_id=occurrence_id)
+            except (
+                ScheduleExecutionActive,
+                ScheduleExecutionStale,
+                RuntimeSafetyBlocked,
+                RuntimeSafetyStale,
+            ):
                 continue
 
     def _status_in(self, c: sqlite3.Connection, definition: ScheduleDefinition) -> ScheduleStatus:
-        executions = self._executions.executions_in(c, definition.schedule_id, limit=1)
-        latest = executions[0] if executions else None
+        policy = self._definitions.writable_policy_in(c, definition.generation_id)
+        latest = (
+            self._executions.latest_for_schedule_in(c, definition.schedule_id)
+            if policy is None
+            else self._executions.latest_writable_for_generation_in(
+                c, definition.schedule_id, definition.generation_id
+            )
+        )
         decision = schedule_timing_decision(definition, latest)
         active = latest is not None and not latest.status.terminal
+        ready = (
+            policy is None
+            or next_writable_round(policy, latest, definition.generation_id) is not None
+        )
         return ScheduleStatus(
             definition=definition,
             latest_occurrence=_public_occurrence(latest) if latest else None,
-            next_run_at=decision.due_at,
-            missing_expected_occurrence_at=decision.due_at if decision.due and not active else None,
+            next_run_at=decision.due_at if ready else None,
+            missing_expected_occurrence_at=decision.due_at
+            if ready and decision.due and not active
+            else None,
         )
 
 

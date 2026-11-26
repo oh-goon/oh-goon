@@ -1556,6 +1556,16 @@
         "additionalProperties": false,
         "description": "Bounded native-agent claim, distinct from supervisor and producer facts.",
         "properties": {
+          "final_advisory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeFinalAdvisory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "enum": [
               "agent",
@@ -10382,6 +10392,19 @@
             },
             "title": "Project Deliveries",
             "type": "array"
+          },
+          "retained_review_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retained Review Run Id"
           },
           "reviewed_repository_source": {
             "anyOf": [
@@ -20047,6 +20070,29 @@
           }
         },
         "title": "NativeAgentProfile",
+        "type": "object"
+      },
+      "NativeFinalAdvisory": {
+        "additionalProperties": false,
+        "description": "Bounded final report text supplied by the original native agent.",
+        "properties": {
+          "omitted_characters": {
+            "minimum": 0.0,
+            "title": "Omitted Characters",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "omitted_characters"
+        ],
+        "title": "NativeFinalAdvisory",
         "type": "object"
       },
       "NativeRuntimeSliceEvidence": {
@@ -30845,6 +30891,42 @@
         "title": "RetainedPlanCacheSource",
         "type": "object"
       },
+      "RetainedReviewScheduleCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "interval_minutes": {
+            "maximum": 10080.0,
+            "minimum": 1.0,
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "interval_minutes"
+        ],
+        "title": "RetainedReviewScheduleCreateRequest",
+        "type": "object"
+      },
       "ReviewEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -39725,6 +39807,73 @@
         ],
         "title": "WorktreeState",
         "type": "string"
+      },
+      "WritableScheduleCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "interval_minutes": {
+            "maximum": 10080.0,
+            "minimum": 1.0,
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "seed_advance_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+            "title": "Seed Advance Id",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/WritableScheduleTask"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "seed_advance_id",
+          "tasks",
+          "interval_minutes"
+        ],
+        "title": "WritableScheduleCreateRequest",
+        "type": "object"
+      },
+      "WritableScheduleTask": {
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "task_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "prompt"
+        ],
+        "title": "WritableScheduleTask",
+        "type": "object"
       }
     }
   },
@@ -47197,6 +47346,190 @@
           }
         },
         "summary": "Replace",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{schedule_id}/from-branch-advance": {
+      "post": {
+        "operationId": "create_schedule_from_branch_advance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WritableScheduleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDefinition"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Create From Branch Advance",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{schedule_id}/from-review-run": {
+      "post": {
+        "operationId": "create_schedule_from_retained_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainedReviewScheduleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDefinition"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Create From Retained Review",
         "tags": [
           "schedules"
         ]

@@ -74,7 +74,10 @@ from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_strict_policy_enrollment import StrictFleetPolicyEnrollment
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
     from oh_goon.core.models.fleet_plan import ResolvedPlanStep
     from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
@@ -208,6 +211,27 @@ class FleetRunLifecycle:
         """Serialize one caller-stable admission identity without creating durable state."""
         with serialize_run_admission(self._database.path, identity):
             yield
+
+    def require_writable_round_candidate(
+        self,
+        admission: CandidateWorkspaceAdmission,
+        repository: Path,
+        advance_id: str,
+        *,
+        schedule_run_id: str | None = None,
+    ) -> None:
+        from oh_goon.core.models.writable_schedule import is_scheduled_branch_advance_id
+        from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
+        from oh_goon.services.fleet_plan_candidate import require_branch_round_candidate
+
+        receipt = require_branch_round_candidate(self._database, admission, repository)
+        if receipt.preparation.advance_id != advance_id:
+            raise StateConflict("Writable round differs from its recorded branch advancement")
+        if schedule_run_id is None and (
+            is_scheduled_branch_advance_id(advance_id)
+            or ScheduleDefinitionStore(self._database).seed_reserved(advance_id)
+        ):
+            raise StateConflict("Branch advancement belongs to a writable Schedule")
 
     def require_cli_plan_preparation(self, run_id: str | None) -> None:
         """Retain the CLI spelling while sharing one pre-resolution ingress owner."""
@@ -535,6 +559,28 @@ class FleetRunLifecycle:
             rerun_from_run_id=rerun_from_run_id,
         )
         self.require_agent_history_authorization(target)
+        if (
+            source is FleetRunSource.SCHEDULED
+            and isinstance(target, FleetPlanTarget)
+            and target.retained_review_run_id is not None
+        ):
+            if (
+                self._content_store is None
+                or len(targets) != 1
+                or len(target.agent_deliveries) != 1
+            ):
+                raise FleetPlanInvalid("Scheduled review lacks its original retained input binding")
+            (delivery,) = target.agent_deliveries
+            try:
+                self._content_store.preflight_reference_metadata(
+                    delivery.reference_id,
+                    owner_repository_id=targets[0].repository_id,
+                    expected_kind="file",
+                )
+            except (FleetPlanInvalid, OSError):
+                raise FleetPlanInvalid(
+                    "Scheduled review's retained Agent delivery is unavailable"
+                ) from None
         application_launch = current_application_launch_receipt()
         if isinstance(target, FleetPlanTarget) and self._require_authenticated_fleet:
             # No legacy fallback (including Strict), replay or execution-ticket
