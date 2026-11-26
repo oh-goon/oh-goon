@@ -333,6 +333,7 @@ def test_worktree_materialization_rejects_wrong_contracts_before_registration(
 def test_worktree_registration_failure_restores_empty_owned_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from oh_goon.engine.command import CommandResult
     from oh_goon.engine.git import GitService
 
     repository, revision = _repository(tmp_path)
@@ -340,18 +341,25 @@ def test_worktree_registration_failure_restores_empty_owned_container(
     _read, binding = _ready_snapshot(manager, repository, revision=revision)
     workspace = _request(manager, kind=WorkspaceKind.WORKTREE, revision=revision)
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
+    global_git_config = tmp_path / "gitconfig"
+    global_git_config.write_text(
+        '[filter "lfs"]\n\tclean = cat\n\tprocess = cat\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_git_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
     original_run = GitService.run
 
     def failing_run(self, *args, **kwargs):
         if "worktree" in args and "add" in args:
-            result = original_run(self, "status", "--porcelain", cwd=repository)
-            return result.__class__(
-                returncode=1, stdout="", stderr="synthetic registration failure"
-            )
+            return CommandResult(returncode=1, stdout="", stderr="synthetic registration failure")
         return original_run(self, *args, **kwargs)
 
     monkeypatch.setattr(GitService, "run", failing_run)
-    with pytest.raises(WorkspaceStateStale, match="Cannot register candidate Git worktree"):
+    with pytest.raises(
+        WorkspaceStateStale,
+        match="Cannot register candidate Git worktree: synthetic registration failure",
+    ):
         manager.materialize_worktree(
             workspace,
             repository,
