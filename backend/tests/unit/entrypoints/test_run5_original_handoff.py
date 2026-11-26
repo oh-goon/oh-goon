@@ -353,6 +353,60 @@ def test_handoff_preserves_failed_verification_beside_successful_untrusted_claim
     assert owner.calls == [("get", "run-5")]
 
 
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (GameTapeStatus.PASSED, {"text": "A", "omitted_characters": 0}),
+        (GameTapeStatus.FAILED, None),
+    ],
+)
+def test_handoff_exposes_typed_advice_on_the_settled_report_event(capsys, status, expected):
+    from oh_goon.core.models.fleet_observation import (
+        AgentHarnessObservation,
+        NativeAgentObservation,
+        NativeFinalAdvisory,
+    )
+
+    claim = NativeAgentObservation(
+        agent="pi",
+        implementation_identity="native",
+        profile="profile",
+        input_identity="input",
+        occurrence="native",
+        source_identity="source",
+        role="report",
+        settled=True,
+        failed=False,
+        native_event_count=1,
+        events=(
+            AgentHarnessObservation(
+                kind="agent",
+                summary="Rendered final summary with independent presentation wording",
+                final_advisory=NativeFinalAdvisory(text="A", omitted_characters=0),
+            ),
+        ),
+    )
+    step = SimpleNamespace(
+        step_execution_id="native-exec",
+        step_id="native",
+        kind="agent",
+        status=status,
+        exit_code=0 if status is GameTapeStatus.PASSED else 7,
+        reason=None,
+        native_agent_observations=(claim,),
+        project_source=None,
+        uv=None,
+        settlement=PlanStepSettlementEvidence(),
+    )
+    tape = _Tape()
+    tape.repositories = (SimpleNamespace(repository_execution_id="repo-exec", steps=(step,)),)
+    assert _invoke(_RunOwner(tape=tape), "--json") == 0
+    event = json.loads(capsys.readouterr().out)["recorded_steps"]["steps"][0]["native_claims"][0][
+        "events"
+    ][0]
+    assert event.get("final_advisory") == expected
+
+
 def test_handoff_bounds_steps_and_qualifies_absent_native_claims(capsys):
     step = SimpleNamespace(
         step_execution_id="exec",

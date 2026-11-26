@@ -684,6 +684,14 @@ def _handoff_step(step: GameTapeStepExecution, repository_execution_id: str) -> 
                     {
                         "kind": event.kind,
                         **_handoff_claim_excerpt(event.summary),
+                        **(
+                            {"final_advisory": event.final_advisory.model_dump(mode="json")}
+                            if event.final_advisory is not None
+                            and item.settled
+                            and not item.failed
+                            and step.status.value == "PASSED"
+                            else {}
+                        ),
                     }
                     for event in item.events[-2:]
                 ],
