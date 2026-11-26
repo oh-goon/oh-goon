@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from oh_goon.core.errors import (
     InvalidRequest,
     RuntimeSafetyBlocked,
     RuntimeSafetyStale,
+    ScheduleDefinitionStale,
     ScheduleExecutionActive,
     ScheduleExecutionStale,
     ScheduleNotFound,
@@ -32,8 +34,9 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.runtime_safety import RuntimeSafetyService
-from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner, next_writable_round
+from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner, next_writable_task_index
 from oh_goon.services.schedule_execution import ScheduleExecutionEngine
+from oh_goon.services.schedule_task_documents import ApprovedTaskDocumentError
 from oh_goon.services.schedule_timing import schedule_timing_decision
 from oh_goon.services.schedule_writable_rounds import WritableScheduleRounds
 
@@ -87,6 +90,17 @@ class ScheduleService:
             tasks=tasks,
             interval_minutes=interval_minutes,
             name=name,
+        )
+
+    def bind_approved_task_document(
+        self, schedule_id: str, *, expected_generation_id: str, path: Path
+    ) -> ScheduleDefinition:
+        if self._writable_rounds is None:
+            raise InvalidRequest(
+                "Approved task docs require the selected writable Schedule runtime"
+            )
+        return self._writable_rounds.bind_approved_task_document(
+            schedule_id, expected_generation_id=expected_generation_id, path=path
         )
 
     def replace_preserving_authority(
@@ -185,10 +199,19 @@ class ScheduleService:
         self._engine.advance_all(allow_effect_admission=allowed)
         if not allowed:
             return
+        document_failure = None
         for candidate in self._definitions.definitions():
             try:
                 scheduled = self._admission.plan_scheduled(candidate.schedule_id)
-            except (ScheduleNotFound, RuntimeSafetyBlocked, RuntimeSafetyStale):
+            except ApprovedTaskDocumentError as exc:
+                document_failure = document_failure or exc
+                continue
+            except (
+                ScheduleNotFound,
+                ScheduleDefinitionStale,
+                RuntimeSafetyBlocked,
+                RuntimeSafetyStale,
+            ):
                 continue
             if scheduled is None:
                 continue
@@ -210,6 +233,8 @@ class ScheduleService:
                 RuntimeSafetyStale,
             ):
                 continue
+        if document_failure is not None:
+            raise document_failure
 
     def _status_in(self, c: sqlite3.Connection, definition: ScheduleDefinition) -> ScheduleStatus:
         policy = self._definitions.writable_policy_in(c, definition.generation_id)
@@ -222,10 +247,14 @@ class ScheduleService:
         )
         decision = schedule_timing_decision(definition, latest)
         active = latest is not None and not latest.status.terminal
-        ready = (
-            policy is None
-            or next_writable_round(policy, latest, definition.generation_id) is not None
-        )
+        ready = True
+        if policy is not None:
+            index = next_writable_task_index(latest, definition.generation_id)
+            ready = (
+                index is not None
+                and self._definitions.writable_task_in(c, definition.generation_id, policy, index)
+                is not None
+            )
         return ScheduleStatus(
             definition=definition,
             latest_occurrence=_public_occurrence(latest) if latest else None,

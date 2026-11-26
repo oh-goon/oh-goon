@@ -23,8 +23,9 @@ from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.agent_providers import AgentProvidersConfig, PiSessionIntent
 from oh_goon.core.models.branch_advance import BranchAdvanceReceipt, PreparedBranchAdvance
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedNativeAgentWorkload
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.parallel_agent_work import ParallelAgentWorkRequest
 from oh_goon.core.models.parallel_candidate_verification import (
     FrozenVerifierInput,
@@ -56,7 +57,15 @@ from tests.factories.native_two_run import (
 )
 
 _POLICY_ENV = "OH_GOON_NATIVE_PARALLEL_CLI_POLICY"
-_HOST_ENV = ("PATH", "LANG", "LC_ALL", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+_HOST_ENV = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR",
+    "UV_OFFLINE",
+    "GIT_ALLOW_PROTOCOL",
+)
 _STATE_ENV = (
     "OH_GOON_DB",
     "OH_GOON_LEAGUE_FILE",
@@ -1371,3 +1380,233 @@ def test_installed_offline_schedule_handoff_uses_recipient_verification_and_reco
     assert BranchAdvanceStore(donor_database).find(advance_id) == published
     assert donor.native(donor.bare, "show-ref") == donor_refs
     assert donor.native(donor.repository, "show-ref", "--head") == donor.original_refs
+
+
+@pytest.mark.certification
+@pytest.mark.no_resume
+def test_installed_writable_schedule_refills_only_from_later_approved_tasks(
+    tmp_path: Path, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.models.writable_schedule import WritableScheduleTask
+
+    selected = _selected_pi_environment(request, timeout=480)
+    if selected is None:
+        return
+    first_prompt = "Record the first approved change to code.py."
+    second_instruction = "Record the second approved change to code.py."
+    note_body = "Keep VALUE equal to 42 and preserve the verified predecessor."
+    withheld = "withheld-refill-context-sentinel"
+
+    with _writable_seed(
+        tmp_path / "receiver",
+        monkeypatch,
+        selected,
+        expected_tasks=(first_prompt, note_body),
+        notes_to_publish=(note_body, withheld),
+    ) as seed:
+        database = LocalDatabase(seed.provider.database_path, read_only=True)
+        branch_advances = BranchAdvanceStore(database)
+        seed_receipt = _advance_seed(seed, "approved-refill-seed")
+        work_id = seed.accepted["parallel_work_id"]
+        notes = AgentNotesStore(database, Journal(database)).read_page(work_id).notes
+        (approved,) = [note for note in notes if note.body == note_body]
+        staged_note = tmp_path / "approved.md"
+        exported = _cli_json(
+            seed.cli,
+            seed.repository,
+            "runs",
+            "parallel-notes",
+            work_id,
+            "--export-note",
+            str(approved.receipt.note_id),
+            "--output",
+            str(staged_note),
+        )
+        note_bytes = staged_note.read_bytes()
+        assert exported["note_ids"] == [approved.receipt.note_id]
+        assert exported["sha256"] == hashlib.sha256(note_bytes).hexdigest()
+        assert b"UNTRUSTED_AGENT_CONTEXT" in note_bytes and note_body.encode() in note_bytes
+        assert withheld.encode() not in note_bytes
+
+        first_task = WritableScheduleTask(task_id="first-change", prompt=first_prompt)
+        second_task = WritableScheduleTask(
+            task_id="second-change",
+            prompt=f"{second_instruction}\n\n{note_bytes.decode('utf-8')}",
+        )
+        approval_path = tmp_path / "approved-tasks.json"
+        runtime = _writable_runtime(seed)
+
+        def current_occurrence() -> tuple[ScheduleOccurrence, ScheduleOccurrenceRepositoryRun]:
+            (status,) = runtime.schedules.catalog().schedules
+            occurrence = status.latest_occurrence
+            assert occurrence is not None
+            page = runtime.schedules.occurrence_repositories(
+                occurrence.schedule_id, occurrence.schedule_run_id
+            )
+            (child,) = page.items
+            return occurrence, child
+
+        def assert_fresh_run(run_id: str, task: WritableScheduleTask, base: str) -> None:
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=60)
+            assert (
+                detail.outcome is FleetRunOutcome.SUCCESS
+                and detail.run.source is FleetRunSource.SCHEDULED
+            )
+            target = detail.run.target
+            assert isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None
+            assert target.candidate_workspace.workspace.base_revision == base
+            (agent,) = [step for step in target.plan.steps if isinstance(step, ResolvedAgentStep)]
+            assert agent.task_sha256 == task.prompt_sha256
+            assert isinstance(agent.workload, ResolvedNativeAgentWorkload)
+            assert agent.workload.native_agent.session == PiSessionIntent(mode="ephemeral")
+            operation = detail.operations[0].evidence
+            assert isinstance(operation, FleetPlanOperationEvidence)
+            (native_step,) = [
+                step for step in operation.plan.steps if step.step_id == agent.step_id
+            ]
+            assert "--no-session" in native_step.argv
+            assert not {"--session", "--session-dir", "--resume", "--continue"}.intersection(
+                native_step.argv
+            )
+
+        try:
+            definition = runtime.schedules.create_writable_rounds(
+                "approved-task-refill",
+                seed_advance_id=seed_receipt.preparation.advance_id,
+                tasks=(first_task,),
+                interval_minutes=1,
+            )
+            now = definition.created_at + timedelta(minutes=1)
+            monkeypatch.setattr(schedule_timing, "utc_now", lambda: now)
+            runtime.schedules.tick()
+            _, first_child = current_occurrence()
+            first_id = first_child.fleet_run_id
+            assert first_id is not None
+            assert_fresh_run(first_id, first_task, seed_receipt.preparation.commit)
+            runtime.schedules.tick()
+            first, first_child = current_occurrence()
+            assert (
+                first.status is ScheduleExecutionStatus.COMPLETED and first.finished_at is not None
+            )
+            first_verified = _cli_json(
+                seed.cli, seed.checkout, "runs", "verify-candidate", first_id
+            )
+            assert first_verified["outcome"] == "PASS"
+            assert first_verified["base_revision"] == seed_receipt.preparation.commit
+            first_events = _run_events(seed.cli, seed.checkout, first_id)
+            assert sum(event["event_type"] == "RUN_ADMITTED" for event in first_events) == 1
+            original_refs = seed.native(seed.bare, "show-ref")
+
+            runtime.schedules.bind_approved_task_document(
+                definition.schedule_id,
+                expected_generation_id=definition.generation_id,
+                path=approval_path,
+            )
+            now = first.finished_at + timedelta(minutes=1)
+            runtime.schedules.tick()
+            assert current_occurrence() == (first, first_child)
+            approval_path.write_text('{"tasks": []}', encoding="utf-8")
+            runtime.schedules.tick()
+            assert current_occurrence() == (first, first_child)
+            assert seed.calls["third"] == 1 and seed.native(seed.bare, "show-ref") == original_refs
+
+            # Only the operator publishes the document, after the first Run has completed.
+            staging = approval_path.with_suffix(".pending")
+            staging.write_text(
+                json.dumps({"tasks": [first_task.model_dump(), second_task.model_dump()]}),
+                encoding="utf-8",
+            )
+            staging.replace(approval_path)
+            runtime.schedules.tick()
+            assert current_occurrence() == (first, first_child)
+            assert seed.calls["third"] == 1 and seed.native(seed.bare, "show-ref") == original_refs
+
+            staged: list[PreparedBranchAdvance] = []
+
+            def lose_publication_acknowledgement(
+                _store: BranchAdvanceStore, preparation: PreparedBranchAdvance, *, observed_tip: str
+            ) -> None:
+                assert preparation.verification.fleet_run_id == first_id
+                assert preparation.verification.checkpoint_id == first_verified["checkpoint_id"]
+                assert (
+                    observed_tip
+                    == preparation.commit
+                    == seed.native(seed.bare, "rev-parse", seed.ref)
+                )
+                staged.append(preparation)
+                raise _InterruptedController("lost refill publication acknowledgement")
+
+            with monkeypatch.context() as patch:
+                patch.setattr(BranchAdvanceStore, "confirm", lose_publication_acknowledgement)
+                with pytest.raises(_InterruptedController, match="lost refill publication"):
+                    runtime.schedules.tick()
+            (prepared,) = staged
+            pending, pending_child = current_occurrence()
+            assert pending.schedule_run_id != first.schedule_run_id
+            assert pending.status is ScheduleExecutionStatus.RUNNING
+            assert pending_child.fleet_run_id is None and seed.calls["third"] == 1
+            assert prepared.expected_tip == seed_receipt.preparation.commit
+            assert (
+                seed.native(seed.bare, "rev-parse", f"{prepared.commit}^1") == prepared.expected_tip
+            )
+            published_refs = seed.native(seed.bare, "show-ref")
+            runtime.shutdown()
+
+            runtime = _writable_runtime(seed)
+            runtime.schedules.tick()
+            second, second_child = current_occurrence()
+            second_id = second_child.fleet_run_id
+            assert second.schedule_run_id == pending.schedule_run_id
+            assert second_id is not None and second_id != first_id
+            assert_fresh_run(second_id, second_task, prepared.commit)
+            receipt = branch_advances.find_by_next_run(second_id)
+            assert receipt is not None and receipt.published_at is not None
+            assert receipt.preparation == prepared
+
+            second_verified = _cli_json(
+                seed.cli, seed.checkout, "runs", "verify-candidate", second_id
+            )
+            assert (
+                second_verified["outcome"] == "PASS"
+                and second_verified["base_revision"] == prepared.commit
+            )
+            assert seed.native(seed.checkout, "rev-parse", "HEAD") == prepared.commit
+            assert (seed.checkout / "code.py").read_bytes() == _FIRST_WRITABLE_EDIT
+            second_events = _run_events(seed.cli, seed.checkout, second_id)
+            (second_admission,) = [
+                event for event in second_events if event["event_type"] == "RUN_ADMITTED"
+            ]
+            assert receipt.published_at <= datetime.fromisoformat(second_admission["generated_at"])
+            runtime.schedules.tick()
+            settled, settled_child = current_occurrence()
+            assert (
+                settled.status is ScheduleExecutionStatus.COMPLETED
+                and settled.finished_at is not None
+            )
+            assert settled_child.fleet_run_id == second_id
+            now = settled.finished_at + timedelta(minutes=2)
+            for _ in range(2):
+                runtime.schedules.tick()
+            assert current_occurrence() == (settled, settled_child)
+            history = runtime.runs.history(source=FleetRunSource.SCHEDULED).items
+            assert tuple(item.run.fleet_run_id for item in history) == (second_id, first_id)
+            assert _run_events(seed.cli, seed.checkout, first_id) == first_events
+            assert _run_events(seed.cli, seed.checkout, second_id) == second_events
+            assert seed.native(seed.bare, "show-ref") == published_refs
+            assert seed.calls == {"a": 1, "b": 1, "third": 2}
+            assert not seed.provider.errors, seed.provider.errors
+
+            initial_transcripts = [
+                json.dumps(body["messages"])
+                for body in seed.provider.requests["third"]
+                if body.get("tools")
+                and not any(message["role"] == "tool" for message in body["messages"])
+            ]
+            first_transcript, second_transcript = initial_transcripts
+            assert first_prompt in first_transcript and note_body not in first_transcript
+            assert second_instruction in second_transcript and first_prompt not in second_transcript
+            assert note_body in second_transcript and "UNTRUSTED_AGENT_CONTEXT" in second_transcript
+            assert "edited-third-1" not in second_transcript
+            assert withheld not in json.dumps(seed.provider.requests["third"])
+        finally:
+            runtime.shutdown()

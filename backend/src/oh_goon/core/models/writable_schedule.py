@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import AfterValidator, Field, field_validator, model_validator
@@ -75,6 +76,31 @@ WritableScheduleTasks = Annotated[
 ]
 
 
+class ApprovedTaskDocument(ImmutableModel):
+    """One operator-selected document in its original directory."""
+
+    path: Path
+    directory_device: int = Field(ge=0)
+    directory_inode: int = Field(gt=0)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, path: Path) -> Path:
+        if not path.is_absolute() or not path.name or ".." in path.parts or "\x00" in str(path):
+            raise ValueError("Approved task document requires an absolute file path")
+        return path
+
+
+class ApprovedTaskBatch(ImmutableModel):
+    """The bounded, ordered contents of the selected task document."""
+
+    tasks: Annotated[
+        tuple[WritableScheduleTask, ...],
+        Field(max_length=MAX_WRITABLE_SCHEDULE_TASKS),
+        AfterValidator(_require_unique_tasks),
+    ]
+
+
 class WritableSchedulePolicy(ImmutableModel):
     seed_advance_id: BranchAdvanceId
     native_selection_id: str = Field(min_length=1, max_length=160)
@@ -90,7 +116,7 @@ class WritableSchedulePolicy(ImmutableModel):
 
 
 class ScheduledWritableRound(ImmutableModel):
-    task_index: int = Field(ge=0, lt=MAX_WRITABLE_SCHEDULE_TASKS)
+    task_index: int = Field(ge=0)
     task: WritableScheduleTask
     advance_id: BranchAdvanceId
     predecessor_run_id: BranchRunId | None = None

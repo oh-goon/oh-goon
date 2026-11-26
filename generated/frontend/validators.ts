@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 002863b5488939e077e0a5ff72d50a1e5da62ef59478ae0e68804ed84877d523
+// OPENAPI_SHA256: 4095657f556c30820d8bfdc583f5e86dc078f943a56b54279f182d3b83678259
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -9,7 +9,7 @@ import type { OperationName } from "@generated/operations";
 import { fail, validateReference, validateUnion } from "@generated/validatorRuntime";
 import { validateAdoptUvPreview } from "@generated/validatorParts/validatorPart000";
 import { validateAgentCampaignResult, validateAgentContinuationInspection, validateAgentContinuationRequest, validateAgentContinuationResult } from "@generated/validatorParts/validatorPart001";
-import { validateApiErrorResponse, validateBrowseResponse, validateCancellationRequestedPlacementQueueEntry } from "@generated/validatorParts/validatorPart004";
+import { validateApiErrorResponse, validateApprovedTaskDocumentBindRequest, validateBrowseResponse, validateCancellationRequestedPlacementQueueEntry } from "@generated/validatorParts/validatorPart004";
 import { validateCapabilityInfo } from "@generated/validatorParts/validatorPart006";
 import { validateCatalogExploration, validateCatalogExploreRequest, validateCatalogPreview, validateCatalogPreviewRequest } from "@generated/validatorParts/validatorPart007";
 import { validateCatalogRunRequest } from "@generated/validatorParts/validatorPart008";
@@ -69,6 +69,10 @@ export function decodeOperationRequest(name: OperationName, value: unknown): unk
     }
     case "add_location": {
       validateReference("LocationRequest", validateLocationRequest, value, "$", "add_location request", new Set());
+      return value;
+    }
+    case "bind_approved_task_document": {
+      validateReference("ApprovedTaskDocumentBindRequest", validateApprovedTaskDocumentBindRequest, value, "$", "bind_approved_task_document request", new Set());
       return value;
     }
     case "cancel_fleet_run": {
@@ -234,6 +238,10 @@ export function decodeOperationResponse(name: OperationName, value: unknown): un
     }
     case "adopt_uv_preview": {
       validateReference("AdoptUvPreview", validateAdoptUvPreview, value, "$", "adopt_uv_preview response", new Set());
+      return value;
+    }
+    case "bind_approved_task_document": {
+      validateReference("ScheduleDefinition", validateScheduleDefinition, value, "$", "bind_approved_task_document response", new Set());
       return value;
     }
     case "browse": {

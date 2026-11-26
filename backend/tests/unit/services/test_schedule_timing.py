@@ -15,7 +15,6 @@ from oh_goon.core.models.schedule_execution import (
 )
 from oh_goon.core.models.writable_schedule import (
     ScheduledWritableRound,
-    WritableSchedulePolicy,
     WritableScheduleTask,
     writable_schedule_advance_id,
     writable_schedule_run_id,
@@ -26,7 +25,7 @@ from oh_goon.core.vocabulary import (
     ScheduleRepositoryRunStatus,
     ScheduleState,
 )
-from oh_goon.services.schedule_admission import ScheduleAdmissionPlan, next_writable_round
+from oh_goon.services.schedule_admission import ScheduleAdmissionPlan, next_writable_task_index
 from oh_goon.services.schedule_timing import ScheduleTimingDecision, schedule_timing_decision
 from oh_goon.services.schedules import ScheduleService
 from tests.factories.schedules import (
@@ -153,20 +152,19 @@ def test_missed_intervals_keep_the_original_due_anchor(has_terminal: bool) -> No
     assert decision.due_at == due_at
 
 
-def test_writable_selection_keeps_authored_order_and_stops_on_failure_or_exhaustion() -> None:
+def test_next_writable_index_requires_a_successful_predecessor() -> None:
     definition = _definition(interval=2)
     generation = definition.generation_id
     tasks = (
         WritableScheduleTask(task_id="z-first", prompt="Inspect the first change."),
         WritableScheduleTask(task_id="a-second", prompt="Inspect the second change."),
     )
-    policy = WritableSchedulePolicy(
-        seed_advance_id="published-seed", tasks=tasks, native_selection_id="selected-runtime"
+    seed = ScheduledWritableRound(
+        task_index=0,
+        task=tasks[0],
+        advance_id="published-seed",
+        native_selection_id="selected-runtime",
     )
-    seed = next_writable_round(policy, None, generation)
-    assert seed is not None
-    assert seed.task == tasks[0] and seed.advance_id == policy.seed_advance_id
-    assert seed.predecessor_run_id is None
 
     def observed(selected: ScheduledWritableRound, success: bool) -> ScheduleRunRecord:
         now = utc_now()
@@ -193,15 +191,17 @@ def test_writable_selection_keeps_authored_order_and_stops_on_failure_or_exhaust
             }
         )
 
-    successor = next_writable_round(policy, observed(seed, True), generation)
-    assert successor is not None
-    assert successor.task == tasks[1] and successor.task_index == 1
-    assert successor.predecessor_run_id == branch_round_run_id(seed.advance_id)
-    assert successor.advance_id == writable_schedule_advance_id(
-        writable_schedule_run_id(generation, 1)
+    assert next_writable_task_index(None, generation) == 0
+    assert next_writable_task_index(observed(seed, True), generation) == 1
+    successor = ScheduledWritableRound(
+        task_index=1,
+        task=tasks[1],
+        predecessor_run_id=branch_round_run_id(seed.advance_id),
+        advance_id=writable_schedule_advance_id(writable_schedule_run_id(generation, 1)),
+        native_selection_id="selected-runtime",
     )
-    assert next_writable_round(policy, observed(successor, True), generation) is None
-    assert next_writable_round(policy, observed(seed, False), generation) is None
+    assert next_writable_task_index(observed(successor, True), generation) == 2
+    assert next_writable_task_index(observed(seed, False), generation) is None
 
 
 def _scheduled_admission(

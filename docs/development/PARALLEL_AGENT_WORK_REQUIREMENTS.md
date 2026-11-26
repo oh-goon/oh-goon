@@ -270,11 +270,14 @@ The successor runs the frozen baseline and outgoing verifiers in its own Step
 lifecycle. A verified result may authorize another advance on the same lineage.
 
 The [writable Schedule](../AUTOMATION_MODEL.md#scheduled-writable-rounds)
-selects the next entry from one immutable, operator-approved task list. The
-original Schedule occurrence records selection before publication or admission.
+selects the next entry from an immutable, operator-approved task list. After
+exhaustion, an explicitly bound [approved task document](../AUTOMATION_MODEL.md#refill-a-writable-schedule-from-approved-task-docs)
+can append another bounded batch to the same generation. The original Schedule
+occurrence records selection before Git publication or Run admission.
 The original Fleet admission commits the actual successor target and its
 Schedule binding together. Restart reopens the same selection, branch receipt
-and Run. A failed predecessor or an exhausted task list stops further selection.
+and Run. A failed predecessor stops progression. An exhausted list waits for
+additional approved tasks.
 
 The [offline host handoff](../AUTOMATION_MODEL.md#move-scheduled-writable-work-to-another-host)
 transfers the selected Git ref and reviewed task documents. The receiving host

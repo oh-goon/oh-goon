@@ -204,6 +204,51 @@ def test_writable_schedule_accepts_ordered_tasks_under_local_access() -> None:
     assert calls == [("writable", "published-seed", authored.tasks, 2, None)]
 
 
+def test_approved_task_document_binding_requires_local_access_and_explicit_selection(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from oh_goon.api.dependencies import schedule_service
+    from tests.factories.schedules import schedule_definition
+
+    definition = schedule_definition(
+        now=datetime(2026, 8, 21, tzinfo=UTC),
+        schedule_id="writable",
+        name="Writable tasks",
+        repository_ids=("receiving",),
+        interval_minutes=2,
+    )
+    calls: list[tuple[str, str, Path]] = []
+
+    def bind(schedule_id: str, *, expected_generation_id: str, path: Path) -> ScheduleDefinition:
+        calls.append((schedule_id, expected_generation_id, path))
+        return definition
+
+    app = create_app(local_access_token="schedule-approved-document-test-token")
+    app.dependency_overrides[schedule_service] = lambda: SimpleNamespace(
+        bind_approved_task_document=bind
+    )
+    route = "/api/schedules/writable/approved-task-document"
+    path = tmp_path / "approved.json"
+    body = {"expected_generation_id": definition.generation_id, "path": str(path)}
+
+    with closing(TestClient(app)) as anonymous:
+        assert anonymous.put(route, json=body).status_code == 401
+    with closing(authenticated_api_client(app)) as client:
+        incomplete = client.put(route, json={"expected_generation_id": definition.generation_id})
+        assert incomplete.status_code == 422
+        assert client.put(route, json={**body, "expected_generation_id": ""}).status_code == 422
+        assert client.put(route, json={**body, "tasks": []}).status_code == 422
+        assert calls == []
+        result = client.put(route, json=body)
+        assert result.status_code == 200
+        assert result.json() == definition.model_dump(mode="json")
+
+    assert calls == [("writable", definition.generation_id, path)]
+
+
 def test_schedule_can_be_created_from_shared_plan_without_browser_resolution() -> None:
     from datetime import UTC, datetime
 

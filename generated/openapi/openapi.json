@@ -2554,6 +2554,27 @@
         "title": "ApiErrorResponse",
         "type": "object"
       },
+      "ApprovedTaskDocumentBindRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_generation_id": {
+            "minLength": 1,
+            "title": "Expected Generation Id",
+            "type": "string"
+          },
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_generation_id",
+          "path"
+        ],
+        "title": "ApprovedTaskDocumentBindRequest",
+        "type": "object"
+      },
       "AssessedRuntimeSafetyProof": {
         "discriminator": {
           "mapping": {
@@ -47346,6 +47367,98 @@
           }
         },
         "summary": "Replace",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{schedule_id}/approved-task-document": {
+      "put": {
+        "operationId": "bind_approved_task_document",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovedTaskDocumentBindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDefinition"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Bind Approved Task Document",
         "tags": [
           "schedules"
         ]
