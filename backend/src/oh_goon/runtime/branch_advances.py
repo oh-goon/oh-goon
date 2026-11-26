@@ -100,13 +100,17 @@ class BranchAdvanceStore:
                 if original.preparation != preparation:
                     raise StateConflict("Branch advancement ID already binds a different proposal")
                 return original
+            # Legacy subject tokens and stable bare-owner tokens name the same Git lane
+            # when their original canonical paths match.
             competing = connection.execute(
                 "SELECT advance_id FROM branch_advances "
-                "WHERE branch_owner_subject_id=? AND branch_ref=? AND expected_tip=?",
+                "WHERE branch_ref=? AND expected_tip=? AND (branch_owner_subject_id=? "
+                "OR json_extract(preparation_json, '$.branch_owner_path')=?)",
                 (
-                    preparation.branch_owner_subject_id,
                     preparation.branch_ref,
                     preparation.expected_tip,
+                    preparation.branch_owner_subject_id,
+                    str(preparation.branch_owner_path),
                 ),
             ).fetchone()
             if competing is not None:

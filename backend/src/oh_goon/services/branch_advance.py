@@ -20,7 +20,7 @@ from oh_goon.core.models.branch_advance import (
 )
 from oh_goon.core.models.parallel_agent_work import BaseCommit
 from oh_goon.core.models.writable_schedule import is_scheduled_branch_advance_id
-from oh_goon.core.product_identity import repository_id, repository_subject_instance_id
+from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import FleetRunOutcome
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.parallel_branch_advance import (
@@ -120,9 +120,13 @@ def advance_verified_candidate(
     if repositories.require_included(logical_repository).path != workspace:
         raise StateConflict("Branch advance requires its exact registered receiving checkout")
     git = workspace_control_git(git)
-    pin = RepositoryWorkspaceAuthority.pin_repository_subject
-    with pin(owner) as require_owner_current, pin(workspace) as require_checkout_current:
-        owner_subject = repository_subject_instance_id(owner)
+    with (
+        RepositoryWorkspaceAuthority.pin_bare_branch_owner(owner) as (
+            owner_subject,
+            require_owner_current,
+        ),
+        RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_checkout_current,
+    ):
         checkout_identity = RepositoryWorkspaceAuthority.receiving_checkout_identity(workspace)
         with serialize_branch_handoff(database.path, checkout_identity):
             require_scheduled_selection()
@@ -151,13 +155,15 @@ def advance_verified_candidate(
                         prior.repository_path != workspace
                         or prior.checkout_identity != checkout_identity
                         or prior.branch_owner_path != owner
-                        or prior.branch_owner_subject_id != owner_subject
                         or prior.branch_ref != request.branch_ref
                         or prior.commit != request.expected_tip
                     ):
                         raise StateConflict(
                             "Writable candidate belongs to a different branch lineage"
                         )
+                    RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+                        owner, prior.branch_owner_subject_id
+                    )
                 elif _overlap(workspace, original):
                     raise FleetPlanInvalid(
                         "Select a receiving checkout separate from the original Run"
@@ -222,13 +228,14 @@ def advance_verified_candidate(
                 if receipt.published_at is not None:
                     return receipt
             prepared = receipt.preparation
-            if (prepared.checkout_identity, prepared.branch_owner_subject_id) != (
-                RepositoryWorkspaceAuthority.receiving_checkout_identity(workspace),
-                owner_subject,
+            if (
+                prepared.checkout_identity
+                != RepositoryWorkspaceAuthority.receiving_checkout_identity(workspace)
             ):
-                raise StateConflict(
-                    "Git owner or receiving checkout was replaced after preparation"
-                )
+                raise StateConflict("Receiving checkout was replaced after branch preparation")
+            RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+                owner, prepared.branch_owner_subject_id
+            )
             require_branch_checkout(
                 git,
                 checkout=workspace,

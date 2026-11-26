@@ -249,18 +249,20 @@ def start_writable_round(
         snapshot = _snapshot(prepared)
         _verifier(database, prepared)
         with (
-            RepositoryWorkspaceAuthority.pin_repository_subject(
-                prepared.branch_owner_path
-            ) as require_owner_current,
+            RepositoryWorkspaceAuthority.pin_bare_branch_owner(prepared.branch_owner_path) as (
+                _,
+                require_owner_current,
+            ),
             RepositoryWorkspaceAuthority.pin_repository_subject(
                 workspace
             ) as require_checkout_current,
             TemporaryDirectory(prefix="oh-goon-branch-round-") as temporary,
         ):
+            RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+                prepared.branch_owner_path, prepared.branch_owner_subject_id
+            )
             if (
-                repository_subject_instance_id(prepared.branch_owner_path)
-                != prepared.branch_owner_subject_id
-                or RepositoryWorkspaceAuthority.receiving_checkout_identity(workspace)
+                RepositoryWorkspaceAuthority.receiving_checkout_identity(workspace)
                 != prepared.checkout_identity
             ):
                 raise StateConflict("Branch advancement's original repository subject changed")

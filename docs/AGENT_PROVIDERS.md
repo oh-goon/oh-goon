@@ -697,6 +697,10 @@ To select approved tasks and advance between them on a wall-clock interval,
 reserve the initial published receipt in the existing Schedule before starting
 its successor. [Scheduled writable rounds](AUTOMATION_MODEL.md#scheduled-writable-rounds)
 
+To continue on a different host, transfer the selected Git ref and reviewed
+task documents, then establish a fresh local seed on the receiving host.
+[Offline host handoff](AUTOMATION_MODEL.md#move-scheduled-writable-work-to-another-host)
+
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,
 uncertain namespace/writer facts and lost acknowledgements retain their own

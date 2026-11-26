@@ -82,6 +82,10 @@ class _ChildBinding(TypedDict):
     target: FleetPlanTarget
 
 
+_LEGACY_OWNER = "repo-subject-instance-" + "a" * 64
+_STABLE_BARE_OWNER = "bare-branch-owner-" + "b" * 64
+
+
 def _preparation(root: Path, advance_id: str = "advance-a") -> PreparedBranchAdvance:
     prior = "a" * 40
     return PreparedBranchAdvance(
@@ -194,22 +198,35 @@ def test_advancement_replays_only_its_exact_publication_and_successor(tmp_path: 
     )
 
 
-def test_concurrent_advances_reserve_the_same_native_tip_only_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "owner_ids",
+    (
+        pytest.param((_LEGACY_OWNER, _LEGACY_OWNER), id="same-identity"),
+        pytest.param((_LEGACY_OWNER, _STABLE_BARE_OWNER), id="legacy-and-stable"),
+    ),
+)
+def test_concurrent_advances_reserve_the_same_native_tip_only_once(
+    tmp_path: Path, owner_ids: tuple[str, str]
+) -> None:
     path = tmp_path / "state" / "oh-goon.db"
     first = BranchAdvanceStore(LocalDatabase(path))
     second = BranchAdvanceStore(LocalDatabase(path))
 
-    def prepare(store: BranchAdvanceStore, advance_id: str) -> bool:
+    def prepare(store: BranchAdvanceStore, advance_id: str, owner_id: str) -> bool:
         try:
-            store.prepare(_preparation(tmp_path, advance_id))
+            store.prepare(
+                _preparation(tmp_path, advance_id).model_copy(
+                    update={"branch_owner_subject_id": owner_id}
+                )
+            )
         except StateConflict as error:
             assert str(error) == "This exact prior branch tip already has an advancement"
             return False
         return True
 
     with ThreadPoolExecutor(max_workers=2) as workers:
-        a = workers.submit(prepare, first, "a")
-        b = workers.submit(prepare, second, "b")
+        a = workers.submit(prepare, first, "a", owner_ids[0])
+        b = workers.submit(prepare, second, "b", owner_ids[1])
         assert sorted((a.result(timeout=10), b.result(timeout=10))) == [False, True]
     assert sum(store is not None for store in (first.find("a"), first.find("b"))) == 1
 
@@ -397,6 +414,60 @@ def test_writable_policy_reserves_a_published_seed_until_the_definition_is_remov
     assert reopened.writable_policy(paused.generation_id) is None
     recreated = reopened.create("writable", request, writable_policy=policy)
     assert recreated.generation_id != paused.generation_id
+
+
+def test_writable_policy_reserves_the_same_branch_across_owner_identity_changes(
+    tmp_path: Path,
+) -> None:
+    database = LocalDatabase(tmp_path / "state" / "app.db")
+    branches = BranchAdvanceStore(database)
+    legacy = _preparation(tmp_path, "legacy-seed").model_copy(
+        update={"branch_owner_subject_id": _LEGACY_OWNER}
+    )
+    current = _preparation(tmp_path / "receiving", "current-seed").model_copy(
+        update={
+            "repository_id": "repository-b",
+            "checkout_identity": "checkout-anchor-b",
+            "branch_owner_path": legacy.branch_owner_path,
+            "branch_owner_subject_id": _STABLE_BARE_OWNER,
+            "expected_tip": legacy.commit,
+            "commit": "f" * 40,
+            "tree": "9" * 40,
+            "verification": legacy.verification.model_copy(
+                update={
+                    "fleet_run_id": "candidate-run-b",
+                    "base_revision": legacy.commit,
+                    "source_sha256": "8" * 64,
+                }
+            ),
+        }
+    )
+    for prepared in (legacy, current):
+        branches.prepare(prepared)
+        branches.confirm(prepared, observed_tip=prepared.commit)
+
+    definitions = ScheduleDefinitionStore(database)
+    first = definitions.create(
+        "legacy-queue",
+        schedule_create(repository_ids=(legacy.repository_id,)),
+        writable_policy=_writable_policy(legacy),
+    )
+    request = schedule_create(repository_ids=(current.repository_id,))
+    policy = _writable_policy(current)
+    reopened = ScheduleDefinitionStore(LocalDatabase(database.path))
+    with pytest.raises(StateConflict, match="already owns this seed, branch or checkout"):
+        reopened.create("current-queue", request, writable_policy=policy)
+    assert reopened.definitions() == [first]
+
+    reopened.delete(
+        first.schedule_id,
+        ScheduleDeleteRequest(
+            generation_id=first.generation_id,
+            record_version=first.record_version,
+        ),
+    )
+    second = reopened.create("current-queue", request, writable_policy=policy)
+    assert reopened.writable_policy(second.generation_id) == policy
 
 
 def test_writable_selection_survives_pause_and_admission_rollback(tmp_path: Path) -> None:

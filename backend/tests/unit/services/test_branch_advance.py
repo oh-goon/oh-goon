@@ -12,6 +12,7 @@ import pytest
 from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerification
 from oh_goon.core.vocabulary import FleetRunOutcome
+from oh_goon.engine.git import GitService
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.parallel_branch_advance import PreparedBranchAdvance
 from oh_goon.integrations.parallel_candidate_patch import NativeCandidatePatch
@@ -25,7 +26,9 @@ def test_exact_retry_recovers_published_git_before_confirming_the_original_recei
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bare, checkout, source = (tmp_path / name for name in ("bare", "checkout", "source"))
-    for path in (bare, checkout, source):
+    native = GitService().run("init", "-q", "--bare", str(bare), cwd=tmp_path)
+    assert native.returncode == 0, native.stderr
+    for path in (checkout, source):
         path.mkdir()
     (checkout / ".git").mkdir()
     (checkout / ".git/config").write_text("[core]\n\tbare = false\n", encoding="utf-8")
@@ -88,8 +91,15 @@ def test_exact_retry_recovers_published_git_before_confirming_the_original_recei
         assert options["prepared"] == proposed
         pending = store.find(request.advance_id)
         assert pending is not None and pending.published_at is None
+        assert pending.preparation.branch_owner_subject_id.startswith("bare-branch-owner-")
         assert pending.preparation.patch_sha256 == hashlib.sha256(patch.read_bytes()).hexdigest()
         if not published:
+            lock = bare / "HEAD.lock"
+            lock.touch()
+            lock.unlink()
+            require_current = options["require_current"]
+            assert callable(require_current)
+            require_current()
             published = True
             raise OSError("Git acknowledgement interrupted")
 

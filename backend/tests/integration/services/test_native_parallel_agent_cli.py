@@ -20,8 +20,10 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.agent_providers import AgentProvidersConfig, PiSessionIntent
-from oh_goon.core.models.branch_advance import PreparedBranchAdvance
+from oh_goon.core.models.branch_advance import BranchAdvanceReceipt, PreparedBranchAdvance
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.parallel_agent_work import ParallelAgentWorkRequest
 from oh_goon.core.models.parallel_candidate_verification import (
@@ -30,6 +32,7 @@ from oh_goon.core.models.parallel_candidate_verification import (
 )
 from oh_goon.core.models.run_resources import RunConcurrencyPolicy
 from oh_goon.core.models.schedule import ScheduleOccurrence, ScheduleOccurrenceRepositoryRun
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import (
     FleetRunOutcome,
     FleetRunSource,
@@ -38,8 +41,10 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
+from oh_goon.runtime.agent_notes import AgentNotesStore
 from oh_goon.runtime.branch_advances import BranchAdvanceStore
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal
 from oh_goon.services import schedule_timing
 from oh_goon.services.branch_advance import BranchAdvanceRequest, advance_verified_candidate
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -468,6 +473,14 @@ _SECOND_WRITABLE_EDIT = b"VALUE = 42\n# Second verified round\n"
 
 
 @dataclass(frozen=True)
+class _TransferredBranch:
+    bundle: Path
+    ref: str
+    commit: str
+    tree: str
+
+
+@dataclass(frozen=True)
 class _WritableSeed:
     cli: Path
     repository: Path
@@ -484,7 +497,9 @@ class _WritableSeed:
 
     @staticmethod
     def native(path: Path, *arguments: str) -> str:
-        result = GitService().run(*arguments, cwd=path)
+        result = GitService().run(
+            "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", *arguments, cwd=path
+        )
         assert result.returncode == 0, (arguments, result.stderr)
         return result.stdout
 
@@ -495,7 +510,10 @@ def _writable_seed(
     monkeypatch: pytest.MonkeyPatch,
     selected: tuple[RunConcurrencyPolicy, Path, Path],
     *,
-    expected_tasks: tuple[str, str] | None = None,
+    expected_tasks: tuple[str, ...] | None = None,
+    transfer: _TransferredBranch | None = None,
+    notes_to_publish: tuple[str, str] | None = None,
+    withheld_context: str | None = None,
 ) -> Generator[_WritableSeed, None, None]:
     policy, program, runtime_root = selected
     cli = Path(sys.executable).with_name("oh-goon")
@@ -503,21 +521,53 @@ def _writable_seed(
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(tmp_path / "league.yml"))
     monkeypatch.setenv("HASHMARKS_NO_UPDATE_CHECK", "1")
 
-    edits = {
-        "a": ((_ORIGINAL_WRITABLE_SOURCE, _ACCEPTED_WRITABLE_SEED),),
-        "b": ((_ORIGINAL_WRITABLE_SOURCE, b"VALUE = 43\n"),),
-        "third": (
+    incoming_seed = _ORIGINAL_WRITABLE_SOURCE if transfer is None else _ACCEPTED_WRITABLE_SEED
+    accepted_seed = _ACCEPTED_WRITABLE_SEED if transfer is None else _FIRST_WRITABLE_EDIT
+    following_edits = (
+        (
             (_ACCEPTED_WRITABLE_SEED, _FIRST_WRITABLE_EDIT),
             (_FIRST_WRITABLE_EDIT, _SECOND_WRITABLE_EDIT),
-        ),
+        )
+        if transfer is None
+        else ((_FIRST_WRITABLE_EDIT, _SECOND_WRITABLE_EDIT),)
+    )
+    edits = {
+        "a": ((incoming_seed, accepted_seed),),
+        "b": ((incoming_seed, b"VALUE = 43\n"),),
+        "third": following_edits,
     }
     calls = {label: 0 for label in edits}
+    notes = dict(zip(("a", "b"), notes_to_publish, strict=True)) if notes_to_publish else {}
+
+    def invoke(name: str, arguments: dict[str, Any], call_id: str) -> tuple[dict[str, Any], str]:
+        return {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+            ],
+        }, "tool_calls"
 
     def model_turn(label: str, body: dict[str, Any]) -> tuple[dict[str, Any], str]:
         tools_returned = [item["content"] for item in body["messages"] if item["role"] == "tool"]
-        if tools_returned:
+        if withheld_context is not None:
+            assert withheld_context not in json.dumps(body)
+        if label in notes and not tools_returned:
+            assert "agent_notes_publish" in {item["function"]["name"] for item in body["tools"]}
+            return invoke(
+                "agent_notes_publish",
+                {"request_id": f"handoff-{label}", "kind": "observation", "body": notes[label]},
+                f"publish_{label}",
+            )
+        if len(tools_returned) > int(label in notes):
             assert f"edited-{label}-{calls[label]}" in json.dumps(tools_returned)
             return {"role": "assistant", "content": "The candidate edit is ready."}, "stop"
+        if label in notes:
+            assert f"handoff-{label}" in json.dumps(tools_returned)
 
         if label == "third" and expected_tasks is not None:
             assert expected_tasks[calls[label]] in json.dumps(body["messages"])
@@ -543,17 +593,7 @@ def _writable_seed(
         arguments = {"command" if "command" in properties else "cmd": command}
         if "description" in properties:
             arguments["description"] = "Edit the exact incoming candidate"
-        return {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "index": 0,
-                    "id": f"edit_{label}_{calls[label]}",
-                    "type": "function",
-                    "function": {"name": tool["name"], "arguments": json.dumps(arguments)},
-                }
-            ],
-        }, "tool_calls"
+        return invoke(tool["name"], arguments, f"edit_{label}_{calls[label]}")
 
     with native_two_run_provider(
         tmp_path,
@@ -565,13 +605,34 @@ def _writable_seed(
     ) as provider:
         repository = provider.repositories["a"]
         native = _WritableSeed.native
-        original = native(repository, "rev-parse", "HEAD")
-        original_refs = native(repository, "show-ref", "--head")
         bare = tmp_path / "branch-owner.git"
         checkout = tmp_path / "receiving"
         ref = "refs/heads/qualification/writable"
-        native(tmp_path, "clone", "--bare", "--local", "--no-hardlinks", str(repository), str(bare))
-        native(bare, "update-ref", ref, original)
+        if transfer is None:
+            native(
+                tmp_path, "clone", "--bare", "--local", "--no-hardlinks", str(repository), str(bare)
+            )
+            native(bare, "update-ref", ref, native(repository, "rev-parse", "HEAD"))
+        else:
+            repository = tmp_path / "imported-source"
+            native(tmp_path, "init", "--bare", "--quiet", str(bare))
+            native(bare, "bundle", "verify", str(transfer.bundle))
+            native(
+                bare,
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                str(transfer.bundle),
+                f"{transfer.ref}:{ref}",
+            )
+            assert native(bare, "show-ref") == f"{transfer.commit} {ref}"
+            native(bare, "symbolic-ref", "HEAD", ref)
+            native(tmp_path, "clone", "--local", "--no-hardlinks", str(bare), str(repository))
+            assert native(repository, "rev-parse", "HEAD^{tree}") == transfer.tree
+        original = native(repository, "rev-parse", "HEAD")
+        if transfer is not None:
+            assert original == transfer.commit
+        original_refs = native(repository, "show-ref", "--head")
         native(tmp_path, "clone", "--local", "--no-hardlinks", str(bare), str(checkout))
         native(checkout, "switch", "--detach", original)
         for path in (repository, checkout):
@@ -587,7 +648,7 @@ def _writable_seed(
         ).encode()
         executable = Path("/usr/bin/python3").resolve(strict=True)
         work = ParallelAgentWorkRequest(
-            work_id="native-writable-seed",
+            work_id="native-writable-seed" if transfer is None else "native-imported-seed",
             workspace=repository,
             expected_base_revision=original,
             task="Produce the fixture value accepted by the independent verifier.",
@@ -598,7 +659,7 @@ def _writable_seed(
             ),
             provider_catalog=catalog,
             capacity=policy,
-            notes_enabled=False,
+            notes_enabled=bool(notes),
             verifier=ParallelCandidateVerifier(
                 acceptance="The first line of the fixture must assign VALUE = 42.",
                 executable=str(executable),
@@ -640,6 +701,82 @@ def _writable_seed(
             failed,
             calls,
         )
+
+
+def _advance_seed(seed: _WritableSeed, advance_id: str) -> BranchAdvanceReceipt:
+    runtime = ApplicationRuntime.build(standard_local=True, startup_purpose="workflow")
+    try:
+        return advance_verified_candidate(
+            BranchAdvanceRequest(
+                advance_id=advance_id,
+                fleet_run_id=seed.accepted["fleet_run_id"],
+                checkpoint_id=seed.accepted["checkpoint_id"],
+                branch_owner=seed.bare,
+                workspace=seed.checkout,
+                branch_ref=seed.ref,
+                expected_tip=seed.original,
+            ),
+            database=LocalDatabase(seed.provider.database_path),
+            repositories=runtime.repositories,
+        )
+    finally:
+        runtime.shutdown()
+
+
+def _writable_runtime(seed: _WritableSeed) -> ApplicationRuntime:
+    _, isolation, git = resolve_native_cli_selection(
+        agent="pi",
+        profile=seed.provider.selected["third"].profile_name,
+        workspace=seed.checkout,
+        config_file=seed.catalog,
+        session=PiSessionIntent(mode="ephemeral"),
+    )
+    assert isolation is not None
+    return ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=isolation, native_git_service=git
+    )
+
+
+_RECOVER_RECIPIENT_SCHEDULE = """
+import json
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.models.agent_providers import PiSessionIntent
+from oh_goon.core.vocabulary import FleetRunSource, ScheduleExecutionStatus
+from oh_goon.services import schedule_timing
+
+_, isolation, git = resolve_native_cli_selection(
+    agent="pi", profile=sys.argv[2], workspace=Path(sys.argv[1]),
+    config_file=Path(sys.argv[3]), session=PiSessionIntent(mode="ephemeral"),
+)
+assert isolation is not None
+now = datetime.fromisoformat(sys.argv[4])
+schedule_timing.utc_now = lambda: now
+runtime = ApplicationRuntime.build(
+    standard_local=True, standard_process_isolation=isolation, native_git_service=git,
+)
+try:
+    runtime.schedules.tick()
+    (status,) = runtime.schedules.catalog().schedules
+    latest = status.latest_occurrence
+    assert latest is not None and latest.status is ScheduleExecutionStatus.COMPLETED
+    assert latest.finished_at is not None
+    now = latest.finished_at + timedelta(minutes=2)
+    runtime.schedules.tick()
+    (final,) = runtime.schedules.catalog().schedules
+    assert final.latest_occurrence == latest and final.next_run_at is None
+    history = runtime.runs.history(source=FleetRunSource.SCHEDULED).items
+    print(json.dumps({
+        "occurrence": latest.schedule_run_id,
+        "run_ids": [item.run.fleet_run_id for item in history],
+    }))
+finally:
+    runtime.shutdown()
+"""
 
 
 @pytest.mark.certification
@@ -851,23 +988,7 @@ def test_installed_writable_schedule_restarts_without_repeating_admitted_round(
     ) as seed:
         database = LocalDatabase(seed.provider.database_path)
         advances = BranchAdvanceStore(database)
-
-        def build_runtime() -> ApplicationRuntime:
-            _, isolation, git = resolve_native_cli_selection(
-                agent="pi",
-                profile=seed.provider.selected["third"].profile_name,
-                workspace=seed.checkout,
-                config_file=seed.catalog,
-                session=PiSessionIntent(mode="ephemeral"),
-            )
-            assert isolation is not None
-            return ApplicationRuntime.build(
-                standard_local=True,
-                standard_process_isolation=isolation,
-                native_git_service=git,
-            )
-
-        runtime = build_runtime()
+        runtime = _writable_runtime(seed)
 
         def current_occurrence() -> tuple[ScheduleOccurrence, ScheduleOccurrenceRepositoryRun]:
             (status,) = runtime.schedules.catalog().schedules
@@ -958,7 +1079,7 @@ def test_installed_writable_schedule_restarts_without_repeating_admitted_round(
             first_events = _run_events(seed.cli, seed.checkout, first_id)
             runtime.shutdown()
 
-            runtime = build_runtime()
+            runtime = _writable_runtime(seed)
             runtime.schedules.tick()
             settled, settled_child = current_occurrence()
             assert settled.schedule_run_id == first.schedule_run_id
@@ -999,7 +1120,7 @@ def test_installed_writable_schedule_restarts_without_repeating_admitted_round(
             refs = seed.native(seed.bare, "show-ref")
             runtime.shutdown()
 
-            runtime = build_runtime()
+            runtime = _writable_runtime(seed)
             runtime.schedules.tick()
             resumed, second_child = current_occurrence()
             assert resumed.schedule_run_id == interrupted.schedule_run_id
@@ -1028,3 +1149,225 @@ def test_installed_writable_schedule_restarts_without_repeating_admitted_round(
             assert seed.native(seed.repository, "show-ref", "--head") == seed.original_refs
         finally:
             runtime.shutdown()
+
+
+@pytest.mark.certification
+@pytest.mark.no_resume
+def test_installed_offline_schedule_handoff_uses_recipient_verification_and_recovers_once(
+    tmp_path: Path, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rehearse two independent state roots and two recovery cuts on one Linux host."""
+    from oh_goon.core.models.writable_schedule import WritableScheduleTask
+
+    selected = _selected_pi_environment(request, timeout=420)
+    if selected is None:
+        return
+    selected_context = "Keep VALUE equal to 42 and record the receiving handoff."
+    withheld_context = "withheld-donor-context-sentinel"
+    handoff = tmp_path / "handoff"
+    handoff.mkdir(mode=0o700)
+    with _writable_seed(
+        tmp_path / "donor",
+        monkeypatch,
+        selected,
+        notes_to_publish=(selected_context, withheld_context),
+    ) as donor:
+        donor_paths = _environment(_STATE_ENV)
+        donor_database = LocalDatabase(donor.provider.database_path, read_only=True)
+        donor_store = BranchAdvanceStore(donor_database)
+        advance_id = "donor-handoff"
+
+        def interrupt_after_donor_publication(
+            _store: BranchAdvanceStore, preparation: PreparedBranchAdvance, *, observed_tip: str
+        ) -> None:
+            assert (
+                observed_tip
+                == preparation.commit
+                == donor.native(donor.bare, "rev-parse", donor.ref)
+            )
+            raise _InterruptedController("lost donor publication acknowledgement")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(BranchAdvanceStore, "confirm", interrupt_after_donor_publication)
+            with pytest.raises(_InterruptedController, match="lost donor publication"):
+                _advance_seed(donor, advance_id)
+        pending = donor_store.find(advance_id)
+        assert pending is not None and pending.published_at is None
+        donor_refs = donor.native(donor.bare, "show-ref")
+        published = _advance_seed(donor, advance_id)
+        assert published.preparation == pending.preparation and published.published_at is not None
+        assert published.next_run is None
+        assert donor.native(donor.bare, "show-ref") == donor_refs
+
+        transfer = _TransferredBranch(
+            handoff / "approved.bundle",
+            donor.ref,
+            published.preparation.commit,
+            published.preparation.tree,
+        )
+        donor.native(donor.bare, "bundle", "create", str(transfer.bundle), transfer.ref)
+        assert donor.native(donor.bare, "bundle", "list-heads", str(transfer.bundle)) == (
+            f"{transfer.commit} {transfer.ref}"
+        )
+        work_id = donor.accepted["parallel_work_id"]
+        notes = AgentNotesStore(donor_database, Journal(donor_database)).read_page(work_id).notes
+        assert {note.body for note in notes} == {selected_context, withheld_context}
+        (approved,) = [note for note in notes if note.body == selected_context]
+        document = handoff / "approved.md"
+        export = _cli_json(
+            donor.cli,
+            donor.repository,
+            "runs",
+            "parallel-notes",
+            work_id,
+            "--export-note",
+            str(approved.receipt.note_id),
+            "--output",
+            str(document),
+        )
+        markdown = document.read_bytes()
+        assert export["note_ids"] == [approved.receipt.note_id]
+        assert export["sha256"] == hashlib.sha256(markdown).hexdigest()
+        assert b"UNTRUSTED_AGENT_CONTEXT" in markdown and selected_context.encode() in markdown
+        assert withheld_context.encode() not in markdown
+        assert not donor.provider.errors, donor.provider.errors
+    # Only the selected files cross this point. Donor's controller and provider are stopped.
+    donor_view = Journal(donor_database).read_view()
+
+    with _writable_seed(
+        tmp_path / "recipient",
+        monkeypatch,
+        selected,
+        expected_tasks=(selected_context,),
+        transfer=transfer,
+        withheld_context=withheld_context,
+    ) as recipient:
+        recipient_paths = _environment(_STATE_ENV)
+        for name in (
+            "OH_GOON_DB",
+            "OH_GOON_LEAGUE_FILE",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "XDG_CACHE_HOME",
+        ):
+            assert recipient_paths[name] != donor_paths[name]
+        assert recipient.original == transfer.commit
+        assert (recipient.repository / "code.py").read_bytes() == _ACCEPTED_WRITABLE_SEED
+        assert recipient.accepted["base_revision"] == transfer.commit
+        assert donor_view.run_detail(recipient.accepted["fleet_run_id"]) is None
+
+        # The current entrypoint requires an original local candidate. Bootstrap from the
+        # imported commit with a real recipient worker and native verifier before publication.
+        bootstrap = _advance_seed(recipient, "recipient-handoff")
+        assert bootstrap.published_at is not None and bootstrap.next_run is None
+        assert bootstrap.preparation.verification.fleet_run_id == recipient.accepted["fleet_run_id"]
+        assert recipient.native(
+            recipient.bare, "rev-parse", f"{bootstrap.preparation.commit}^"
+        ) == (transfer.commit)
+        recipient_database = LocalDatabase(recipient.provider.database_path, read_only=True)
+        assert BranchAdvanceStore(recipient_database).find(advance_id) is None
+        assert (
+            Journal(recipient_database).read_view().run_detail(donor.accepted["fleet_run_id"])
+            is None
+        )
+        imported_markdown = tmp_path / "recipient" / "approved.md"
+        imported_markdown.write_bytes(markdown)
+        prompt = (
+            "Apply the approved receiving change. Use this selected Markdown as attributed context.\n\n"
+            + imported_markdown.read_text(encoding="utf-8")
+        )
+        tasks = (WritableScheduleTask(task_id="receiving-edit", prompt=prompt),)
+        runtime = _writable_runtime(recipient)
+        try:
+            with pytest.raises(StateConflict, match="original published branch advance"):
+                runtime.schedules.create_writable_rounds(
+                    "foreign-receipt", seed_advance_id=advance_id, tasks=tasks, interval_minutes=1
+                )
+            assert runtime.schedules.catalog().schedules == ()
+            definition = runtime.schedules.create_writable_rounds(
+                "recipient-writable",
+                seed_advance_id=bootstrap.preparation.advance_id,
+                tasks=tasks,
+                interval_minutes=1,
+            )
+            now = definition.created_at + timedelta(minutes=1)
+            monkeypatch.setattr(schedule_timing, "utc_now", lambda: now)
+            start = FleetRunControlPlane._start_intent
+
+            def interrupt_after_recipient_admission(
+                control: FleetRunControlPlane, *args: Any, **kwargs: Any
+            ) -> None:
+                assert start(control, *args, **kwargs).source is FleetRunSource.SCHEDULED
+                raise _InterruptedController("lost recipient admission acknowledgement")
+
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    FleetRunControlPlane, "_start_intent", interrupt_after_recipient_admission
+                )
+                with pytest.raises(_InterruptedController, match="lost recipient admission"):
+                    runtime.schedules.tick()
+            (status,) = runtime.schedules.catalog().schedules
+            pending_occurrence = status.latest_occurrence
+            assert pending_occurrence is not None
+            (pending_child,) = runtime.schedules.occurrence_repositories(
+                definition.schedule_id, pending_occurrence.schedule_run_id
+            ).items
+            run_id = pending_child.fleet_run_id
+            assert (
+                pending_child.status is ScheduleRepositoryRunStatus.RUNNING and run_id is not None
+            )
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=60)
+            assert detail.outcome is FleetRunOutcome.SUCCESS, detail.model_dump_json()[-12000:]
+            target = detail.run.target
+            assert isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None
+            assert (
+                target.candidate_workspace.workspace.base_revision == bootstrap.preparation.commit
+            )
+            (agent,) = [step for step in target.plan.steps if isinstance(step, ResolvedAgentStep)]
+            assert agent.task_sha256 == tasks[0].prompt_sha256
+            (tape,) = detail.game_tape.repositories
+            assert [
+                (step.step_id.rsplit(".", 1)[-1], step.status.value) for step in tape.steps
+            ] == [
+                ("verify-base", "PASSED"),
+                ("native-agent", "PASSED"),
+                ("verify-1", "PASSED"),
+            ]
+            events = _run_events(recipient.cli, recipient.checkout, run_id)
+            assert sum(event["event_type"] == "RUN_ADMITTED" for event in events) == 1
+            runtime.shutdown()
+
+            code, output, errors = _operator(
+                Path(sys.executable),
+                recipient.checkout,
+                "-I",
+                "-c",
+                _RECOVER_RECIPIENT_SCHEDULE,
+                str(recipient.checkout),
+                recipient.provider.selected["third"].profile_name,
+                str(recipient.catalog),
+                now.isoformat(),
+                environment={**_environment(_HOST_ENV), **recipient_paths},
+                timeout=60,
+            )
+            assert code == 0, (output[-4096:], errors)
+            assert json.loads(output) == {
+                "occurrence": pending_occurrence.schedule_run_id,
+                "run_ids": [run_id],
+            }
+            assert _run_events(recipient.cli, recipient.checkout, run_id) == events
+            assert recipient.calls["third"] == 1 and not recipient.provider.errors
+            verified = _cli_json(
+                recipient.cli, recipient.checkout, "runs", "verify-candidate", run_id
+            )
+            assert verified["outcome"] == "PASS"
+            assert donor_view.run_detail(run_id) is None
+        finally:
+            runtime.shutdown()
+
+    after = Journal(donor_database).read_view()
+    assert after.session_id == donor_view.session_id and after.revision == donor_view.revision
+    assert BranchAdvanceStore(donor_database).find(advance_id) == published
+    assert donor.native(donor.bare, "show-ref") == donor_refs
+    assert donor.native(donor.repository, "show-ref", "--head") == donor.original_refs

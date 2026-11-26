@@ -181,6 +181,90 @@ failed or unverified predecessor stops progression. The last task's verified
 candidate remains available for explicit branch advancement after the list ends.
 [Local writable round setup](AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
 
+### Move scheduled writable work to another host
+
+Pause the source Schedule and let any admitted Run settle. Select a published
+branch advancement with `runs branch-advance` and record its exact ref, commit,
+parent, tree, and Git object format. Review the task documents approved for the
+receiving agent. When the selected material is peer notes, export them with the
+existing task-note command. Keep the full source receipt and runtime state on
+the source host. [Select and export peer notes](AGENT_PROVIDERS.md#share-reviewed-context-and-continue-on-a-named-branch)
+
+In an empty transfer directory, create a native bundle for the selected branch.
+The receiving side needs the expected commit, parent, tree, and file hashes
+from the approved handoff. Record the approved file hashes separately from the
+transferred files. The full bundle includes the branch's reachable
+history, so review that scope before transferring it. `branch.bundle` and the
+explicitly selected `task-context.md` are the portable inputs in this example.
+
+```sh
+(
+  set -eu
+  test "$(git -C "$SOURCE_BARE" rev-parse "$REF^{commit}")" = "$COMMIT"
+  git -C "$SOURCE_BARE" rev-parse --show-object-format
+  git -C "$SOURCE_BARE" bundle create "$TRANSFER/branch.bundle" "$REF"
+  test "$(git bundle list-heads "$TRANSFER/branch.bundle")" = "$COMMIT $REF"
+  cd "$TRANSFER"
+  sha256sum branch.bundle task-context.md > SHA256SUMS
+)
+```
+
+On the receiving host, check the transferred hashes against the approved values
+and check the bundle's advertised ref before importing it. Use a fresh bare Git
+owner with the recorded object format, such as `sha1` or `sha256`. A full bundle
+provides the Git objects for this branch without a remote.
+
+```sh
+(
+  set -eu
+  cd "$TRANSFER"
+  printf '%s  %s\n' "$BUNDLE_SHA256" branch.bundle "$TASK_CONTEXT_SHA256" task-context.md \
+    | sha256sum --check -
+  test "$(git bundle list-heads branch.bundle)" = "$COMMIT $REF"
+  test ! -e "$RECEIVING_BARE"
+  git init --bare --object-format="$OBJECT_FORMAT" "$RECEIVING_BARE"
+  git -C "$RECEIVING_BARE" bundle verify "$TRANSFER/branch.bundle"
+  GIT_ALLOW_PROTOCOL=file GIT_NO_LAZY_FETCH=1 git -C "$RECEIVING_BARE" fetch \
+    --no-tags --no-recurse-submodules --no-write-fetch-head \
+    "$TRANSFER/branch.bundle" "$REF:$REF"
+  test "$(git -C "$RECEIVING_BARE" rev-parse "$REF^{commit}")" = "$COMMIT"
+  test "$(git -C "$RECEIVING_BARE" rev-parse "$COMMIT^1")" = "$PARENT"
+  test "$(git -C "$RECEIVING_BARE" rev-parse "$COMMIT^{tree}")" = "$TREE"
+)
+```
+
+Configure the receiving host with its own Oh-Goon database and League file,
+local tools and managed Pi profile. Use those same state coordinates for the
+CLI, the Schedule server, and restarts. Register two separate checkouts at the
+transferred commit. One is the source for a local qualifying candidate Run.
+The other is the detached receiving checkout used by the writable Schedule.
+
+```sh
+mkdir -p -m 700 "$RECEIVING_STATE"
+export OH_GOON_DB="$RECEIVING_STATE/application.sqlite"
+export OH_GOON_LEAGUE_FILE="$RECEIVING_STATE/league.yml"
+GIT_ALLOW_PROTOCOL=file git clone --no-hardlinks --single-branch \
+  --branch "${REF#refs/heads/}" "$RECEIVING_BARE" "$QUALIFYING_SOURCE"
+GIT_ALLOW_PROTOCOL=file git clone --no-hardlinks --single-branch \
+  --branch "${REF#refs/heads/}" "$RECEIVING_BARE" "$RECEIVING_CHECKOUT"
+git -C "$RECEIVING_CHECKOUT" switch --detach "$COMMIT"
+oh-goon league add-folder "$QUALIFYING_SOURCE"
+oh-goon league add-folder "$RECEIVING_CHECKOUT"
+```
+
+Choose a small approved change and run it from the transferred commit with
+`runs start-parallel` and the receiving host's independently selected frozen
+verifier. Include approved task context in the task text. After the local
+candidate passes, use `runs advance-candidate` to publish it from the transferred
+tip and record the receiving host's own seed. Put approved excerpts from the
+selected documents in the receiving Schedule's task prompts. Restart the
+receiving app with the same local state and scoped runtime to reopen its
+original occurrences. For the restart check, use a one-task test Schedule on
+the receiving host. Record its occurrence and Run IDs before restarting.
+After restart, check that its original Run has one `RUN_ADMITTED` event and
+the Schedule has no extra occurrence. Keep the source Schedule paused while
+the receiving Schedule owns this continuation. [Local branch commands](AGENT_PROVIDERS.md#advance-a-local-agent-branch-and-start-a-writable-round)
+
 ## Schedule definitions are not workflow programs
 
 Valid:

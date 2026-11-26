@@ -29,7 +29,12 @@ from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.workspace import CandidateCheckpoint, WorkspaceRef, WorkspaceState
 from oh_goon.core.path_authority import canonical_path, ensure_private_directory, storage_component
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id, stable_id
+from oh_goon.core.product_identity import (
+    new_checkpoint_id,
+    new_workspace_id,
+    repository_subject_instance_id,
+    stable_id,
+)
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunEventType
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
@@ -68,6 +73,40 @@ def _worktree_git_environment(*, executable_path: str | None = None) -> dict[str
 def _worktree_git_service(git: GitService | None = None) -> GitService:
     selected = git or GitService()
     return selected if selected.metadata_only else replace(selected, metadata_only=True)
+
+
+_BARE_BRANCH_OWNER = "bare-branch-owner"
+_LEGACY_REPOSITORY_SUBJECT = "repo-subject-instance-"
+
+
+def _bare_owner_paths(repository: Path) -> tuple[Path, ...]:
+    if canonical_path(repository) != repository:
+        raise WorkspaceStateStale("Branch advancement requires a canonical bare Git owner")
+    marker = repository / ".git"
+    if marker.exists() or marker.is_symlink():
+        raise WorkspaceStateStale("Branch advancement cannot discover Git outside its bare owner")
+    paths = (repository, repository / "objects", repository / "refs", repository / "config")
+    reftable = repository / "reftable"
+    return (*paths, reftable) if reftable.exists() or reftable.is_symlink() else paths
+
+
+def _bare_owner_identity(repository: Path, facts: tuple[os.stat_result, ...]) -> str:
+    root, objects, refs, config, *reftable = facts
+    if any(not stat.S_ISDIR(entry.st_mode) for entry in (root, objects, refs, *reftable)) or (
+        not stat.S_ISREG(config.st_mode) or config.st_nlink != 1
+    ):
+        raise WorkspaceStateStale("Branch advancement requires the bare owner's own Git storage")
+    storage = {
+        "path": str(repository),
+        "root": (root.st_dev, root.st_ino, root.st_mode),
+        "objects": (objects.st_dev, objects.st_ino, objects.st_mode),
+        "refs": (refs.st_dev, refs.st_ino, refs.st_mode),
+        "config": (config.st_dev, config.st_ino, config.st_mode, config.st_ctime_ns),
+    }
+    if reftable:
+        (table,) = reftable
+        storage["reftable"] = (table.st_dev, table.st_ino, table.st_mode)
+    return stable_id(_BARE_BRANCH_OWNER, storage)
 
 
 _ALLOWED_TRANSITIONS: dict[WorkspaceLifecycleState, frozenset[WorkspaceLifecycleState]] = {
@@ -182,6 +221,63 @@ class RepositoryWorkspaceAuthority:
                 "config": (config.st_dev, config.st_ino, config.st_mode, config.st_ctime_ns),
             },
         )
+
+    @staticmethod
+    def bare_branch_owner_identity(repository: Path) -> str:
+        """Identify native storage across ref, object, and reflog updates."""
+        try:
+            return _bare_owner_identity(
+                repository, tuple(path.lstat() for path in _bare_owner_paths(repository))
+            )
+        except OSError as exc:
+            raise WorkspaceStateStale(
+                "Branch advancement's native Git storage is unavailable"
+            ) from exc
+
+    @staticmethod
+    def require_bare_branch_owner_identity(repository: Path, expected: str) -> None:
+        """Check the identity mode stored in the receipt, including still-valid legacy receipts."""
+        if expected.startswith(f"{_BARE_BRANCH_OWNER}-"):
+            current = RepositoryWorkspaceAuthority.bare_branch_owner_identity(repository)
+        elif expected.startswith(_LEGACY_REPOSITORY_SUBJECT):
+            current = repository_subject_instance_id(repository)
+        else:
+            raise WorkspaceStateStale("Branch advancement has an unsupported Git owner identity")
+        if current != expected:
+            raise WorkspaceStateStale("Writable round's native branch owner was replaced")
+
+    @staticmethod
+    @contextmanager
+    def pin_bare_branch_owner(
+        repository: Path,
+    ) -> Generator[tuple[str, Callable[[], None]], None, None]:
+        """Hold the Git directory identities without freezing their mutable container timestamps."""
+        paths = _bare_owner_paths(repository)
+        flags = (
+            getattr(os, "O_PATH", os.O_RDONLY)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        with ExitStack() as owned:
+            held = []
+            try:
+                for path in paths:
+                    descriptor = os.open(path, flags)
+                    owned.callback(os.close, descriptor)
+                    held.append(os.fstat(descriptor))
+            except OSError as exc:
+                raise WorkspaceStateStale(
+                    "Branch advancement's native Git storage is unavailable"
+                ) from exc
+            identity = _bare_owner_identity(repository, tuple(held))
+
+            def require_current() -> None:
+                RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+                    repository, identity
+                )
+
+            require_current()
+            yield identity, require_current
 
     @staticmethod
     @contextmanager

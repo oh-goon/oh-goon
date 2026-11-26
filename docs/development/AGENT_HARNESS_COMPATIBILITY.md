@@ -94,6 +94,13 @@ round. The installed Pi test exercises two timed tasks against a controlled
 local provider and reopens state after interrupted publication and admission.
 [Writable Schedule restart proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
 
+**Retain** the same native adaptations for an offline branch handoff. The
+receiving runtime recaptures the imported Git source and establishes its own
+verification, model connection and Schedule. The installed rehearsal uses two
+separate local state roots and restarts the receiving app process. A second
+physical host needs its own runtime evidence.
+[Offline handoff proof](../../backend/tests/integration/services/test_native_parallel_agent_cli.py)
+
 ## Frozen context continuity — 2026-11-05
 
 [HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths

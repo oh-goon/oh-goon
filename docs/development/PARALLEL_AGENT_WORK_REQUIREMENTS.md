@@ -276,6 +276,12 @@ The original Fleet admission commits the actual successor target and its
 Schedule binding together. Restart reopens the same selection, branch receipt
 and Run. A failed predecessor or an exhausted task list stops further selection.
 
+The [offline host handoff](../AUTOMATION_MODEL.md#move-scheduled-writable-work-to-another-host)
+transfers the selected Git ref and reviewed task documents. The receiving host
+starts its own qualifying Run from the transferred commit and records its own
+verified branch seed. Restart evidence belongs to the receiving Schedule and
+its local Journal.
+
 Advance unattended collaboration in this order and verify each boundary on the
 selected environment.
 

@@ -333,6 +333,19 @@ def _reserve_writable_policy(
             "Writable Schedule requires an unused published branch receipt for its repository"
         )
     prepared = receipt.preparation
+    competing = connection.execute(
+        "SELECT 1 FROM schedule_writable_policies AS policy "
+        "JOIN branch_advances AS seed ON seed.advance_id = policy.seed_advance_id "
+        "WHERE policy.branch_ref=? AND (policy.branch_owner_subject_id=? "
+        "OR json_extract(seed.preparation_json, '$.branch_owner_path')=?)",
+        (
+            prepared.branch_ref,
+            prepared.branch_owner_subject_id,
+            str(prepared.branch_owner_path),
+        ),
+    ).fetchone()
+    if competing is not None:
+        raise StateConflict("Writable Schedule already owns this seed, branch or checkout")
     try:
         connection.execute(
             "INSERT INTO schedule_writable_policies "

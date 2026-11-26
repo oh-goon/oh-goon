@@ -357,7 +357,7 @@ def test_successor_retry_preserves_published_source_and_original_authored_select
 
     database, repositories, repository = case
     owner = tmp_path / "owner.git"
-    owner.mkdir()
+    _git(tmp_path, "init", "-q", "--bare", str(owner))
     skill = tmp_path / "SKILL.md"
     skill.write_text("# Reviewed task context\n", encoding="utf-8")
     executable = Path("/usr/bin/true").resolve(strict=True)

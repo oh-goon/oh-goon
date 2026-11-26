@@ -95,9 +95,10 @@ def require_current_branch_round_tip(receipt: BranchAdvanceReceipt, *, git: GitS
 
     prepared = receipt.preparation
     owner = prepared.branch_owner_path
-    with RepositoryWorkspaceAuthority.pin_repository_subject(owner) as require_current:
-        if repository_subject_instance_id(owner) != prepared.branch_owner_subject_id:
-            raise StateConflict("Writable round's native branch owner was replaced")
+    with RepositoryWorkspaceAuthority.pin_bare_branch_owner(owner) as (_, require_current):
+        RepositoryWorkspaceAuthority.require_bare_branch_owner_identity(
+            owner, prepared.branch_owner_subject_id
+        )
         require_published_branch_advance(
             git,
             repository=owner,
