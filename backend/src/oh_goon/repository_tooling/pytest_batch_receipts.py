@@ -76,7 +76,7 @@ def _resolved_member_path(value: str) -> Path:
     return path.resolve() if path.is_absolute() else (_ADMISSION_ROOT / path).resolve()
 
 
-def _member_for_item(item: Any) -> str | None:
+def _member_for_item(item: Any, member_paths: dict[str, Path]) -> str | None:
     try:
         item_path = Path(item.path).resolve()
     except (AttributeError, OSError, TypeError):
@@ -85,10 +85,14 @@ def _member_for_item(item: Any) -> str | None:
     fallback: str | None = None
     for member in _EXPECTED_MEMBERS:
         member_path_text, member_separator, member_selector = member.partition("::")
-        try:
-            if _resolved_member_path(member_path_text) != item_path:
+        member_path = member_paths.get(member_path_text)
+        if member_path is None:
+            try:
+                member_path = _resolved_member_path(member_path_text)
+            except OSError:
                 continue
-        except OSError:
+            member_paths[member_path_text] = member_path
+        if member_path != item_path:
             continue
         if not member_separator:
             if fallback is None:
@@ -128,8 +132,9 @@ def pytest_collection_finish(session: Any) -> None:
         }
         if actual != expected:
             raise pytest.UsageError("Native pytest collection changed after batch admission")
+    member_paths: dict[str, Path] = {}
     for item in session.items:
-        member = _member_for_item(item)
+        member = _member_for_item(item, member_paths)
         if member is None:
             if _EXECUTION_STORE is not None and _ATTEMPT_IDENTITY is not None:
                 _EXECUTION_STORE.record_extra(item.nodeid, attempt_identity=_ATTEMPT_IDENTITY)

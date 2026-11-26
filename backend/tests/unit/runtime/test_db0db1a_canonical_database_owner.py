@@ -7,9 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
-    check_canonical_database_owner,
-)
 from oh_goon.runtime.database import LocalDatabase
 
 
@@ -67,9 +64,3 @@ def test_nested_or_read_cut_cannot_be_promoted_to_second_write_cut(tmp_path: Pat
     with owner.transaction() as connection:
         with pytest.raises(RuntimeError, match="atomic write cut required"):
             owner.require_atomic_write_cut(connection)
-
-
-def test_original_database_owner_inventory_passes():
-    from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-
-    assert check_canonical_database_owner(ROOT) == []

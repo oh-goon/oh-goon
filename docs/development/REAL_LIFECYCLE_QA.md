@@ -164,8 +164,8 @@ Execute through the selected existing native harness and verification owners;
 do not replace repository evidence, inference, tool execution or result
 accounting with a study-specific agent loop. Python uses uv and the backend
 project. Necessary focused boundary proof stays in the edit loop; unrelated
-complete portfolios remain daily. Do not weaken tests or change execution
-policy to make a participant finish.
+complete portfolios remain in scheduled full regression. Do not weaken tests or
+change execution policy to make a participant finish.
 
 An independent reviewer inspects the answer/diff and native check results.
 Record unassisted completion, assisted completion, incorrect/incomplete work
